@@ -4,13 +4,14 @@ import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'preview/live_preview.dart';
+import 'package:http/http.dart' as http;
 
-// IMPORTANT: Replace this with your actual Gemini API key.
-const String geminiApiKey = 'AIzaSyAAsjByv4m_2cXp7hdQn6IcCZGNyQuKZlY';
+// Set this to your secure backend URL (e.g., http://localhost:3000/api/generate)
+// For Android emulator, you might need http://10.0.2.2:3000/api/generate
+const String backendApiUrl = 'http://localhost:3000/api/generate';
 
 // IMPORTANT: Replace these with your Supabase credentials!
 const String supabaseUrl = 'https://ldpodxtofvusyvpbxcta.supabase.co';
@@ -116,13 +117,17 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         }
         return Color(int.parse(hex, radix: 16));
       } else if (colorStr.startsWith('rgba') || colorStr.startsWith('rgb')) {
-        final RegExp regex = RegExp(r'rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)');
+        final RegExp regex = RegExp(
+          r'rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)',
+        );
         final match = regex.firstMatch(colorStr);
         if (match != null) {
           int r = int.parse(match.group(1)!);
           int g = int.parse(match.group(2)!);
           int b = int.parse(match.group(3)!);
-          double a = match.group(4) != null ? double.parse(match.group(4)!) : 1.0;
+          double a = match.group(4) != null
+              ? double.parse(match.group(4)!)
+              : 1.0;
           return Color.fromRGBO(r, g, b, a);
         }
       }
@@ -154,19 +159,8 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     String frameMetadata,
     bool isInitialGeneration,
   ) async {
-    if (geminiApiKey == 'YOUR_GEMINI_API_KEY' || geminiApiKey.isEmpty) {
-      return "<div style='color:red; margin:20px; font-family:sans-serif;'><b>Error:</b> Please add your Gemini API Key in main.dart</div>";
-    }
-
-    final model = GenerativeModel(
-      model: 'gemini-2.5-flash',
-      apiKey: geminiApiKey,
-    );
-
     final promptText = StringBuffer();
-    promptText.writeln(
-      "You are an expert AI layout generator.",
-    );
+    promptText.writeln("You are an expert AI layout generator.");
     promptText.writeln(
       "Look at the provided wireframe/sketch drawn by a user.",
     );
@@ -215,18 +209,27 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       );
     }
 
-    final content = [
-      Content.multi([
-        TextPart(promptText.toString()),
-        DataPart('image/png', imageBytes),
-      ]),
-    ];
-
     try {
-      final response = await model.generateContent(content);
-      String text = response.text ?? "";
+      final base64Image = base64Encode(imageBytes);
+
+      final response = await http.post(
+        Uri.parse(backendApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'promptText': promptText.toString(),
+          'base64Image': base64Image,
+          'isInitialGeneration': isInitialGeneration,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        return "<div style='color:red; margin:20px; font-family:sans-serif;'><b>Error:</b> Backend returned ${response.statusCode}: ${response.body}</div>";
+      }
+
+      final jsonResponse = jsonDecode(response.body);
+      String text = jsonResponse['text'] ?? "";
       debugPrint(
-        "========== GEMINI RAW RESPONSE ==========\n$text\n==========================================",
+        "========== BACKEND RAW RESPONSE ==========\n$text\n==========================================",
       );
 
       // Re-map images
@@ -499,9 +502,13 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text(
-          'Design AI Canvas',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        toolbarHeight: 80,
+        title: Row(
+          children: [
+            Image.asset('assets/1.png', height: 60),
+            const SizedBox(width: 12),
+            Image.asset('assets/1.jpeg', height: 45),
+          ],
         ),
         backgroundColor: Colors.white,
         elevation: 0,
@@ -1388,7 +1395,8 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                               _currentColor = newColor;
                             });
                             updatePreviewColor(
-                                'rgba(${newColor.red}, ${newColor.green}, ${newColor.blue}, ${(newColor.alpha / 255.0).toStringAsFixed(2)})');
+                              'rgba(${newColor.red}, ${newColor.green}, ${newColor.blue}, ${(newColor.alpha / 255.0).toStringAsFixed(2)})',
+                            );
                           },
                           onClose: () {
                             setState(() => _showColorPicker = false);
@@ -2006,7 +2014,7 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
             color: Colors.black12,
             blurRadius: 10,
             offset: Offset(0, 4),
-          )
+          ),
         ],
       ),
       child: Column(
@@ -2021,14 +2029,19 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
                 const Text(
                   "Solid",
                   style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
                 ),
                 InkWell(
                   onTap: widget.onClose,
-                  child: const Icon(Icons.close, size: 16, color: Colors.black54),
-                )
+                  child: const Icon(
+                    Icons.close,
+                    size: 16,
+                    color: Colors.black54,
+                  ),
+                ),
               ],
             ),
           ),
@@ -2047,7 +2060,12 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
               child: Stack(
                 children: [
                   Container(
-                    color: HSVColor.fromAHSV(1.0, _hsvColor.hue, 1.0, 1.0).toColor(),
+                    color: HSVColor.fromAHSV(
+                      1.0,
+                      _hsvColor.hue,
+                      1.0,
+                      1.0,
+                    ).toColor(),
                   ),
                   Container(
                     decoration: const BoxDecoration(
@@ -2076,13 +2094,14 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
                         border: Border.all(color: Colors.white, width: 2),
                         boxShadow: const [
                           BoxShadow(
-                              color: Colors.black45,
-                              blurRadius: 2,
-                              spreadRadius: 1)
+                            color: Colors.black45,
+                            blurRadius: 2,
+                            spreadRadius: 1,
+                          ),
                         ],
                       ),
                     ),
-                  )
+                  ),
                 ],
               ),
             ),
@@ -2116,20 +2135,30 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
                       style: TextStyle(fontSize: 12, color: Colors.black54),
                     ),
                     Text(
-                      _hsvColor.toColor().value.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase(),
+                      _hsvColor
+                          .toColor()
+                          .value
+                          .toRadixString(16)
+                          .padLeft(8, '0')
+                          .substring(2)
+                          .toUpperCase(),
                       style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     Text(
                       "${(_hsvColor.alpha * 100).round()}%",
                       style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
-                )
+                ),
               ],
             ),
-          )
+          ),
         ],
       ),
     );
@@ -2151,7 +2180,7 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
               Color(0xFF00FFFF),
               Color(0xFF0000FF),
               Color(0xFFFF00FF),
-              Color(0xFFFF0000)
+              Color(0xFFFF0000),
             ],
           ),
         ),
@@ -2169,11 +2198,11 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
                   color: Colors.white,
                   border: Border.all(color: Colors.black26),
                   boxShadow: const [
-                    BoxShadow(color: Colors.black26, blurRadius: 2)
+                    BoxShadow(color: Colors.black26, blurRadius: 2),
                   ],
                 ),
               ),
-            )
+            ),
           ],
         ),
       ),
@@ -2199,7 +2228,7 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
                 gradient: LinearGradient(
                   colors: [
                     Colors.transparent,
-                    _hsvColor.toColor().withOpacity(1.0)
+                    _hsvColor.toColor().withOpacity(1.0),
                   ],
                 ),
               ),
@@ -2215,11 +2244,11 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
                   color: Colors.white,
                   border: Border.all(color: Colors.black26),
                   boxShadow: const [
-                    BoxShadow(color: Colors.black26, blurRadius: 2)
+                    BoxShadow(color: Colors.black26, blurRadius: 2),
                   ],
                 ),
               ),
-            )
+            ),
           ],
         ),
       ),
