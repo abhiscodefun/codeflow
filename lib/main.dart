@@ -42,6 +42,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
+        iconTheme: const IconThemeData(weight: 100),
       ),
       home: const SketchPreviewScreen(),
     );
@@ -56,6 +57,8 @@ class SketchPreviewScreen extends StatefulWidget {
 }
 
 class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
+  bool isDarkMode = false;
+  bool _isSidebarOpen = true;
   List<DrawingPoint> points = [];
   bool hasGenerated = false;
   bool isGenerating = false;
@@ -98,9 +101,25 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   int _imageCounter = 0;
   Map<String, String> uploadedImages = {};
 
+  List<String> availableStyles = ['minimal', 'vibrant', 'default'];
+  String currentStyle = 'minimal';
+  bool _isStyleHovered = false;
+  bool _isStyleOptionsHovered = false;
+  Timer? _stylePopupHideTimer;
+  bool _isAddingStyle = false;
+  bool _isPlusHovered = false;
+  final TextEditingController _customStyleController = TextEditingController();
+
+  bool get _showStylePopup => _isStyleHovered || _isStyleOptionsHovered || (_stylePopupHideTimer?.isActive ?? false);
+
   bool _showColorPicker = false;
   Color _currentColor = Colors.white;
   Offset _colorPickerPosition = Offset.zero;
+
+  bool _showPrunePopup = false;
+  Offset _prunePosition = Offset.zero;
+  String _pruneComponentHtml = "";
+  final TextEditingController _pruneController = TextEditingController();
 
   Widget? _cachedLivePreview;
   String? _lastInjectedHtml;
@@ -183,6 +202,9 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       );
       promptText.writeln('USER STYLE PROMPT: "$userPrompt"');
     }
+    promptText.writeln(
+      '5. OVERALL DESIGN STYLE: The user selected the styling preset "$currentStyle". Ensure the generated UI strongly embodies this aesthetic (e.g., if vibrant, use bright colors/gradients and bold shadows; if minimal, use lots of whitespace, stark contrasts, and simple borders; if a custom style, follow it literally).',
+    );
     if (frameMetadata.isNotEmpty) {
       promptText.writeln(
         "4b. FRAME METADATA: Use these exact relative positions (in % of the mobile screen) for placing the specific elements:\n$frameMetadata",
@@ -500,686 +522,623 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        toolbarHeight: 80,
-        title: Row(
-          children: [
-            Image.asset('assets/1.png', height: 60),
-            const SizedBox(width: 12),
-            Image.asset('assets/1.jpeg', height: 45),
-          ],
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0,
-      ),
+      backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
       body: Row(
         children: [
+          _buildSidebar(),
           // Left side: Drawable canvas and bottom prompt
           Expanded(
             child: Container(
-              color: Colors.white,
+              color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
               child: Stack(
                 alignment: Alignment.bottomCenter,
+                fit: StackFit.expand,
                 children: [
-                  Column(
+                  Stack(
                     children: [
-                      Expanded(
-                        child: Stack(
-                          children: [
-                            // Sketch Area inside RepaintBoundary for image capture
-                            InteractiveViewer(
-                              transformationController:
-                                  _transformationController,
-                              panEnabled: currentMode == DrawingMode.select,
-                              scaleEnabled: currentMode == DrawingMode.select,
-                              minScale: 0.1,
-                              maxScale: 4.0,
-                              boundaryMargin: const EdgeInsets.all(
-                                double.infinity,
-                              ),
-                              child: RepaintBoundary(
-                                key: _canvasKey,
-                                child: Container(
-                                  color: Colors.white,
-                                  width: 3000,
-                                  height: 3000,
-                                  child: GestureDetector(
-                                    onTapDown: (details) {
-                                      // If editing, tapping outside closes it
-                                      if (_editingElement != null) {
-                                        setState(() {
-                                          _editingElement!.text =
-                                              _elementTextController.text;
-                                          _editingElement = null;
-                                        });
-                                        return;
-                                      }
+                      // Sketch Area inside RepaintBoundary for image capture
+                      InteractiveViewer(
+                        transformationController: _transformationController,
+                        panEnabled: currentMode == DrawingMode.select,
+                        scaleEnabled: currentMode == DrawingMode.select,
+                        minScale: 0.1,
+                        maxScale: 4.0,
+                        boundaryMargin: const EdgeInsets.all(double.infinity),
+                        child: RepaintBoundary(
+                          key: _canvasKey,
+                          child: Container(
+                            color: Colors.white,
+                            width: 3000,
+                            height: 3000,
+                            child: GestureDetector(
+                              onTapDown: (details) {
+                                // If editing, tapping outside closes it
+                                if (_editingElement != null) {
+                                  setState(() {
+                                    _editingElement!.text =
+                                        _elementTextController.text;
+                                    _editingElement = null;
+                                  });
+                                  return;
+                                }
 
-                                      if (currentMode == DrawingMode.text) {
-                                        _addTextToCanvas(details.localPosition);
-                                      } else if (currentMode ==
-                                          DrawingMode.button) {
-                                        _addButtonToCanvas(
-                                          details.localPosition,
-                                        );
-                                      } else if (currentMode ==
-                                          DrawingMode.select) {
-                                        _selectedFrame = null;
-                                        _dragChildren.clear();
-                                        for (
-                                          var i = points.length - 1;
-                                          i >= 0;
-                                          i--
-                                        ) {
-                                          var p = points[i];
-                                          if (p.secondaryPoint != null &&
-                                              p.type != ShapeType.line) {
-                                            Rect r = Rect.fromPoints(
-                                              p.point,
-                                              p.secondaryPoint!,
-                                            );
-                                            // Make frame selection robust (only edge for frames)
-                                            if (p.type == ShapeType.frame) {
-                                              Rect outerR = r.inflate(20);
-                                              Rect innerR = r.deflate(20);
-                                              if (outerR.contains(
-                                                    details.localPosition,
-                                                  ) &&
-                                                  !innerR.contains(
-                                                    details.localPosition,
-                                                  )) {
-                                                _selectedFrame = p;
-                                                _dragStartOffset =
-                                                    details.localPosition;
-
-                                                // Find all elements fully inside the frame
-                                                for (var sibling in points) {
-                                                  if (sibling != p &&
-                                                      sibling.secondaryPoint !=
-                                                          null &&
-                                                      sibling.type !=
-                                                          ShapeType.line) {
-                                                    Rect
-                                                    sRect = Rect.fromPoints(
-                                                      sibling.point,
-                                                      sibling.secondaryPoint!,
-                                                    );
-                                                    if (r.overlaps(sRect)) {
-                                                      _dragChildren.add(
-                                                        sibling,
-                                                      );
-                                                    }
-                                                  } else if (sibling.type ==
-                                                      ShapeType.text) {
-                                                    // Approximate text rect
-                                                    Rect tRect = Rect.fromLTWH(
-                                                      sibling.point.dx,
-                                                      sibling.point.dy,
-                                                      80,
-                                                      20,
-                                                    );
-                                                    if (r.overlaps(tRect)) {
-                                                      _dragChildren.add(
-                                                        sibling,
-                                                      );
-                                                    }
-                                                  }
-                                                }
-                                                break;
-                                              }
-                                            } else {
-                                              // General drag for image, rect, button, text
-                                              if (r.contains(
-                                                details.localPosition,
-                                              )) {
-                                                _selectedFrame = p;
-                                                _dragStartOffset =
-                                                    details.localPosition;
-                                                break;
-                                              }
-                                            }
-                                          } else if (p.type == ShapeType.text &&
-                                              p.point != Offset.infinite) {
-                                            Rect r = Rect.fromLTWH(
-                                              p.point.dx,
-                                              p.point.dy,
-                                              120,
-                                              40,
-                                            );
-                                            if (r.contains(
+                                if (currentMode == DrawingMode.text) {
+                                  _addTextToCanvas(details.localPosition);
+                                } else if (currentMode == DrawingMode.button) {
+                                  _addButtonToCanvas(details.localPosition);
+                                } else if (currentMode == DrawingMode.select) {
+                                  _selectedFrame = null;
+                                  _dragChildren.clear();
+                                  for (var i = points.length - 1; i >= 0; i--) {
+                                    var p = points[i];
+                                    if (p.secondaryPoint != null &&
+                                        p.type != ShapeType.line) {
+                                      Rect r = Rect.fromPoints(
+                                        p.point,
+                                        p.secondaryPoint!,
+                                      );
+                                      // Make frame selection robust (only edge for frames)
+                                      if (p.type == ShapeType.frame) {
+                                        Rect outerR = r.inflate(20);
+                                        Rect innerR = r.deflate(20);
+                                        if (outerR.contains(
+                                              details.localPosition,
+                                            ) &&
+                                            !innerR.contains(
                                               details.localPosition,
                                             )) {
-                                              _selectedFrame = p;
-                                              _dragStartOffset =
-                                                  details.localPosition;
-                                              break;
-                                            }
-                                          }
-                                        }
-
-                                        // Handle double tap to edit button/text
-                                        if (_selectedFrame != null &&
-                                            (_selectedFrame!.type ==
-                                                    ShapeType.button ||
-                                                _selectedFrame!.type ==
-                                                    ShapeType.text)) {
-                                          // To correctly handle double tap we would need a gesture recognizer,
-                                          // but as a quick logic: if we tapped it, maybe enter edit mode?
-                                          // We'll enter edit mode if they just tap without dragging (handled below).
-                                        }
-                                      }
-                                    },
-                                    onDoubleTapDown: (details) {
-                                      if (currentMode == DrawingMode.select) {
-                                        for (
-                                          var i = points.length - 1;
-                                          i >= 0;
-                                          i--
-                                        ) {
-                                          var p = points[i];
-                                          // check bounds
-                                          Rect r;
-                                          if (p.secondaryPoint != null) {
-                                            r = Rect.fromPoints(
-                                              p.point,
-                                              p.secondaryPoint!,
-                                            );
-                                          } else {
-                                            r = Rect.fromLTWH(
-                                              p.point.dx,
-                                              p.point.dy,
-                                              120,
-                                              40,
-                                            );
-                                          }
-                                          if (r.contains(
-                                                details.localPosition,
-                                              ) &&
-                                              (p.type == ShapeType.button ||
-                                                  p.type == ShapeType.text)) {
-                                            setState(() {
-                                              _editingElement = p;
-                                              _elementTextController.text =
-                                                  p.text ?? "";
-                                            });
-                                            break;
-                                          }
-                                        }
-                                      }
-                                    },
-                                    onPanStart: (details) {
-                                      if (currentMode == DrawingMode.text ||
-                                          currentMode == DrawingMode.button ||
-                                          currentMode == DrawingMode.select)
-                                        return;
-                                      setState(() {
-                                        if (currentMode == DrawingMode.pen) {
-                                          points.add(
-                                            DrawingPoint(
-                                              point: details.localPosition,
-                                              paint: Paint()
-                                                ..strokeCap = StrokeCap.round
-                                                ..isAntiAlias = true
-                                                ..color = Colors.black
-                                                ..strokeWidth = 3.0,
-                                            ),
-                                          );
-                                        } else {
-                                          points.add(
-                                            DrawingPoint(
-                                              point: details.localPosition,
-                                              secondaryPoint:
-                                                  details.localPosition,
-                                              type:
-                                                  currentMode ==
-                                                      DrawingMode.rectangle
-                                                  ? ShapeType.rectangle
-                                                  : ShapeType.circle,
-                                              paint: Paint()
-                                                ..color = Colors.black
-                                                ..strokeWidth = 3.0
-                                                ..style = PaintingStyle.stroke,
-                                            ),
-                                          );
-                                        }
-                                      });
-                                    },
-                                    onPanUpdate: (details) {
-                                      if (currentMode == DrawingMode.text ||
-                                          currentMode == DrawingMode.button)
-                                        return;
-
-                                      if (currentMode == DrawingMode.select &&
-                                          _selectedFrame != null &&
-                                          _dragStartOffset != null) {
-                                        setState(() {
-                                          Offset delta =
-                                              details.localPosition -
-                                              _dragStartOffset!;
-                                          _selectedFrame!.point += delta;
-                                          if (_selectedFrame!.secondaryPoint !=
-                                              null) {
-                                            _selectedFrame!.secondaryPoint =
-                                                _selectedFrame!
-                                                    .secondaryPoint! +
-                                                delta;
-                                          }
-                                          for (var child in _dragChildren) {
-                                            child.point += delta;
-                                            if (child.secondaryPoint != null) {
-                                              child.secondaryPoint =
-                                                  child.secondaryPoint! + delta;
-                                            }
-                                          }
+                                          _selectedFrame = p;
                                           _dragStartOffset =
                                               details.localPosition;
-                                        });
-                                        return;
-                                      } else if (currentMode ==
-                                          DrawingMode.select) {
-                                        return;
-                                      }
 
-                                      setState(() {
-                                        if (currentMode == DrawingMode.pen) {
-                                          points.add(
-                                            DrawingPoint(
-                                              point: details.localPosition,
-                                              paint: Paint()
-                                                ..strokeCap = StrokeCap.round
-                                                ..isAntiAlias = true
-                                                ..color = Colors.black
-                                                ..strokeWidth = 3.0,
-                                            ),
-                                          );
-                                        } else if (currentMode ==
-                                                DrawingMode.rectangle ||
-                                            currentMode == DrawingMode.circle) {
-                                          if (points.isNotEmpty &&
-                                              (points.last.type ==
-                                                      ShapeType.rectangle ||
-                                                  points.last.type ==
-                                                      ShapeType.circle)) {
-                                            points.last.secondaryPoint =
-                                                details.localPosition;
+                                          // Find all elements fully inside the frame
+                                          for (var sibling in points) {
+                                            if (sibling != p &&
+                                                sibling.secondaryPoint !=
+                                                    null &&
+                                                sibling.type !=
+                                                    ShapeType.line) {
+                                              Rect sRect = Rect.fromPoints(
+                                                sibling.point,
+                                                sibling.secondaryPoint!,
+                                              );
+                                              if (r.overlaps(sRect)) {
+                                                _dragChildren.add(sibling);
+                                              }
+                                            } else if (sibling.type ==
+                                                ShapeType.text) {
+                                              // Approximate text rect
+                                              Rect tRect = Rect.fromLTWH(
+                                                sibling.point.dx,
+                                                sibling.point.dy,
+                                                80,
+                                                20,
+                                              );
+                                              if (r.overlaps(tRect)) {
+                                                _dragChildren.add(sibling);
+                                              }
+                                            }
                                           }
+                                          break;
                                         }
-                                      });
-                                    },
-                                    onPanEnd: (details) async {
-                                      if (currentMode == DrawingMode.text ||
-                                          currentMode == DrawingMode.button)
-                                        return;
-                                      if (currentMode == DrawingMode.select) {
-                                        _selectedFrame = null;
-                                        _dragStartOffset = null;
-                                        return;
+                                      } else {
+                                        // General drag for image, rect, button, text
+                                        if (r.contains(details.localPosition)) {
+                                          _selectedFrame = p;
+                                          _dragStartOffset =
+                                              details.localPosition;
+                                          break;
+                                        }
                                       }
+                                    } else if (p.type == ShapeType.text &&
+                                        p.point != Offset.infinite) {
+                                      Rect r = Rect.fromLTWH(
+                                        p.point.dx,
+                                        p.point.dy,
+                                        120,
+                                        40,
+                                      );
+                                      if (r.contains(details.localPosition)) {
+                                        _selectedFrame = p;
+                                        _dragStartOffset =
+                                            details.localPosition;
+                                        break;
+                                      }
+                                    }
+                                  }
+
+                                  // Handle double tap to edit button/text
+                                  if (_selectedFrame != null &&
+                                      (_selectedFrame!.type ==
+                                              ShapeType.button ||
+                                          _selectedFrame!.type ==
+                                              ShapeType.text)) {
+                                    // To correctly handle double tap we would need a gesture recognizer,
+                                    // but as a quick logic: if we tapped it, maybe enter edit mode?
+                                    // We'll enter edit mode if they just tap without dragging (handled below).
+                                  }
+                                }
+                              },
+                              onDoubleTapDown: (details) {
+                                if (currentMode == DrawingMode.select) {
+                                  for (var i = points.length - 1; i >= 0; i--) {
+                                    var p = points[i];
+                                    // check bounds
+                                    Rect r;
+                                    if (p.secondaryPoint != null) {
+                                      r = Rect.fromPoints(
+                                        p.point,
+                                        p.secondaryPoint!,
+                                      );
+                                    } else {
+                                      r = Rect.fromLTWH(
+                                        p.point.dx,
+                                        p.point.dy,
+                                        120,
+                                        40,
+                                      );
+                                    }
+                                    if (r.contains(details.localPosition) &&
+                                        (p.type == ShapeType.button ||
+                                            p.type == ShapeType.text)) {
                                       setState(() {
-                                        if (currentMode == DrawingMode.pen) {
-                                          points.add(
-                                            DrawingPoint(
-                                              point: Offset.infinite,
-                                              paint: Paint(),
-                                            ),
-                                          );
-                                        }
+                                        _editingElement = p;
+                                        _elementTextController.text =
+                                            p.text ?? "";
                                       });
-                                    },
-                                    child: CustomPaint(
-                                      painter: DrawingPainter(
-                                        pointsList: points,
+                                      break;
+                                    }
+                                  }
+                                }
+                              },
+                              onPanStart: (details) {
+                                if (currentMode == DrawingMode.text ||
+                                    currentMode == DrawingMode.button ||
+                                    currentMode == DrawingMode.select)
+                                  return;
+                                setState(() {
+                                  if (currentMode == DrawingMode.pen) {
+                                    points.add(
+                                      DrawingPoint(
+                                        point: details.localPosition,
+                                        paint: Paint()
+                                          ..strokeCap = StrokeCap.round
+                                          ..isAntiAlias = true
+                                          ..color = Colors.black
+                                          ..strokeWidth = 3.0,
                                       ),
-                                      size: const Size(3000, 3000),
-                                    ),
-                                  ),
-                                ),
+                                    );
+                                  } else {
+                                    points.add(
+                                      DrawingPoint(
+                                        point: details.localPosition,
+                                        secondaryPoint: details.localPosition,
+                                        type:
+                                            currentMode == DrawingMode.rectangle
+                                            ? ShapeType.rectangle
+                                            : ShapeType.circle,
+                                        paint: Paint()
+                                          ..color = Colors.black
+                                          ..strokeWidth = 3.0
+                                          ..style = PaintingStyle.stroke,
+                                      ),
+                                    );
+                                  }
+                                });
+                              },
+                              onPanUpdate: (details) {
+                                if (currentMode == DrawingMode.text ||
+                                    currentMode == DrawingMode.button)
+                                  return;
+
+                                if (currentMode == DrawingMode.select &&
+                                    _selectedFrame != null &&
+                                    _dragStartOffset != null) {
+                                  setState(() {
+                                    Offset delta =
+                                        details.localPosition -
+                                        _dragStartOffset!;
+                                    _selectedFrame!.point += delta;
+                                    if (_selectedFrame!.secondaryPoint !=
+                                        null) {
+                                      _selectedFrame!.secondaryPoint =
+                                          _selectedFrame!.secondaryPoint! +
+                                          delta;
+                                    }
+                                    for (var child in _dragChildren) {
+                                      child.point += delta;
+                                      if (child.secondaryPoint != null) {
+                                        child.secondaryPoint =
+                                            child.secondaryPoint! + delta;
+                                      }
+                                    }
+                                    _dragStartOffset = details.localPosition;
+                                  });
+                                  return;
+                                } else if (currentMode == DrawingMode.select) {
+                                  return;
+                                }
+
+                                setState(() {
+                                  if (currentMode == DrawingMode.pen) {
+                                    points.add(
+                                      DrawingPoint(
+                                        point: details.localPosition,
+                                        paint: Paint()
+                                          ..strokeCap = StrokeCap.round
+                                          ..isAntiAlias = true
+                                          ..color = Colors.black
+                                          ..strokeWidth = 3.0,
+                                      ),
+                                    );
+                                  } else if (currentMode ==
+                                          DrawingMode.rectangle ||
+                                      currentMode == DrawingMode.circle) {
+                                    if (points.isNotEmpty &&
+                                        (points.last.type ==
+                                                ShapeType.rectangle ||
+                                            points.last.type ==
+                                                ShapeType.circle)) {
+                                      points.last.secondaryPoint =
+                                          details.localPosition;
+                                    }
+                                  }
+                                });
+                              },
+                              onPanEnd: (details) async {
+                                if (currentMode == DrawingMode.text ||
+                                    currentMode == DrawingMode.button)
+                                  return;
+                                if (currentMode == DrawingMode.select) {
+                                  _selectedFrame = null;
+                                  _dragStartOffset = null;
+                                  return;
+                                }
+                                setState(() {
+                                  if (currentMode == DrawingMode.pen) {
+                                    points.add(
+                                      DrawingPoint(
+                                        point: Offset.infinite,
+                                        paint: Paint(),
+                                      ),
+                                    );
+                                  }
+                                });
+                              },
+                              child: CustomPaint(
+                                painter: DrawingPainter(pointsList: points),
+                                size: const Size(3000, 3000),
                               ),
                             ),
-
-                            // Floating Input field for editable text
-                            if (_editingElement != null &&
-                                _editingElement!.secondaryPoint != null)
-                              Positioned(
-                                left:
-                                    _editingElement!.point.dx <
-                                        _editingElement!.secondaryPoint!.dx
-                                    ? _editingElement!.point.dx
-                                    : _editingElement!.secondaryPoint!.dx,
-                                top:
-                                    _editingElement!.point.dy <
-                                        _editingElement!.secondaryPoint!.dy
-                                    ? _editingElement!.point.dy
-                                    : _editingElement!.secondaryPoint!.dy,
-                                child: Container(
-                                  width:
-                                      (_editingElement!.secondaryPoint!.dx -
-                                              _editingElement!.point.dx)
-                                          .abs(),
-                                  height:
-                                      (_editingElement!.secondaryPoint!.dy -
-                                              _editingElement!.point.dy)
-                                          .abs(),
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: Colors.blueAccent,
-                                      width: 2,
-                                    ),
-                                    color: Colors.white.withOpacity(0.9),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                  ),
-                                  child: Center(
-                                    child: TextField(
-                                      controller: _elementTextController,
-                                      autofocus: true,
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        color: Colors.black,
-                                      ),
-                                      decoration: const InputDecoration(
-                                        border: InputBorder.none,
-                                        isDense: true,
-                                        contentPadding: EdgeInsets.zero,
-                                      ),
-                                      onSubmitted: (val) {
-                                        setState(() {
-                                          _editingElement!.text = val;
-                                          _editingElement = null;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            if (_editingElement != null &&
-                                _editingElement!.type == ShapeType.text)
-                              Positioned(
-                                left: _editingElement!.point.dx,
-                                top: _editingElement!.point.dy,
-                                child: Container(
-                                  width: 150,
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: Colors.blueAccent,
-                                      width: 2,
-                                    ),
-                                    color: Colors.white.withOpacity(0.9),
-                                  ),
-                                  child: TextField(
-                                    controller: _elementTextController,
-                                    autofocus: true,
-                                    style: const TextStyle(
-                                      fontSize: 20,
-                                      color: Colors.black,
-                                    ),
-                                    decoration: const InputDecoration(
-                                      border: InputBorder.none,
-                                      isDense: true,
-                                      contentPadding: EdgeInsets.all(4),
-                                    ),
-                                    onSubmitted: (val) {
-                                      setState(() {
-                                        _editingElement!.text = val;
-                                        _editingElement = null;
-                                      });
-                                    },
-                                  ),
-                                ),
-                              ),
-
-                            // Clear Canvas Button (top right of left area)
-                            Positioned(
-                              top: 20,
-                              right: 20,
-                              child: Tooltip(
-                                message: 'Clear Canvas',
-                                child: Material(
-                                  elevation: 4,
-                                  shape: const CircleBorder(),
-                                  color: Colors.white,
-                                  child: InkWell(
-                                    customBorder: const CircleBorder(),
-                                    onTap: () {
-                                      setState(() {
-                                        points.clear();
-                                        hasGenerated = false;
-                                        generatedHtml = "";
-                                        isClarifying = false;
-                                        _promptController.clear();
-                                        currentMode = DrawingMode.pen;
-                                        uploadedImages.clear();
-                                        _imageCounter = 0;
-                                        _editingElement = null;
-                                        clarifyQuestion =
-                                            "Did you mean a specific layout?";
-                                        clarifySuggestion =
-                                            "I can provide additional variations if needed.";
-                                      });
-                                    },
-                                    child: const Padding(
-                                      padding: EdgeInsets.all(12),
-                                      child: Icon(
-                                        Icons.clear,
-                                        color: Colors.redAccent,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
 
-                      // Bottom generator bar using precisely the new UI
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 20.0),
-                        child: Container(
-                          height: 60,
-                          width:
-                              320, // Match the width generally seen in standard pill UI
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(30),
+                      // Floating Input field for editable text
+                      if (_editingElement != null &&
+                          _editingElement!.secondaryPoint != null)
+                        Positioned(
+                          left:
+                              _editingElement!.point.dx <
+                                  _editingElement!.secondaryPoint!.dx
+                              ? _editingElement!.point.dx
+                              : _editingElement!.secondaryPoint!.dx,
+                          top:
+                              _editingElement!.point.dy <
+                                  _editingElement!.secondaryPoint!.dy
+                              ? _editingElement!.point.dy
+                              : _editingElement!.secondaryPoint!.dy,
+                          child: Container(
+                            width:
+                                (_editingElement!.secondaryPoint!.dx -
+                                        _editingElement!.point.dx)
+                                    .abs(),
+                            height:
+                                (_editingElement!.secondaryPoint!.dy -
+                                        _editingElement!.point.dy)
+                                    .abs(),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: Colors.blueAccent,
+                                width: 2,
+                              ),
+                              color: Colors.white.withOpacity(0.9),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Center(
+                              child: TextField(
+                                controller: _elementTextController,
+                                autofocus: true,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.black,
+                                ),
+                                decoration: const InputDecoration(
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                                onSubmitted: (val) {
+                                  setState(() {
+                                    _editingElement!.text = val;
+                                    _editingElement = null;
+                                  });
+                                },
+                              ),
+                            ),
                           ),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              MouseRegion(
-                                onEnter: (_) =>
-                                    setState(() => _isAddHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isAddHovered = false),
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      // Add a mobile frame sized rectangle
-                                      points.add(
-                                        DrawingPoint(
-                                          point: const Offset(40, 40),
-                                          secondaryPoint: const Offset(
-                                            360,
-                                            690,
-                                          ),
-                                          type: ShapeType.frame,
-                                          paint: Paint()
-                                            ..color = Colors.blueAccent
-                                            ..strokeWidth = 6.0
-                                            ..style = PaintingStyle.stroke,
-                                        ),
-                                      );
-                                    });
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: _isAddHovered
-                                          ? Colors.blue.shade100
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Icon(
-                                      Icons.add_circle_outline,
-                                      color: _isAddHovered
-                                          ? Colors.blueAccent
-                                          : Colors.black,
-                                      size: 28,
-                                    ),
-                                  ),
+                        ),
+                      if (_editingElement != null &&
+                          _editingElement!.type == ShapeType.text)
+                        Positioned(
+                          left: _editingElement!.point.dx,
+                          top: _editingElement!.point.dy,
+                          child: Container(
+                            width: 150,
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: Colors.blueAccent,
+                                width: 2,
+                              ),
+                              color: Colors.white.withOpacity(0.9),
+                            ),
+                            child: TextField(
+                              controller: _elementTextController,
+                              autofocus: true,
+                              style: const TextStyle(
+                                fontSize: 20,
+                                color: Colors.black,
+                              ),
+                              decoration: const InputDecoration(
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: EdgeInsets.all(4),
+                              ),
+                              onSubmitted: (val) {
+                                setState(() {
+                                  _editingElement!.text = val;
+                                  _editingElement = null;
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+
+                      // Clear Canvas Button (top right of left area)
+                      Positioned(
+                        top: 20,
+                        right: 20,
+                        child: Tooltip(
+                          message: 'Clear Canvas',
+                          child: Material(
+                            elevation: 4,
+                            shape: const CircleBorder(),
+                            color: Colors.white,
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: () {
+                                setState(() {
+                                  points.clear();
+                                  hasGenerated = false;
+                                  generatedHtml = "";
+                                  isClarifying = false;
+                                  _promptController.clear();
+                                  currentMode = DrawingMode.pen;
+                                  uploadedImages.clear();
+                                  _imageCounter = 0;
+                                  _editingElement = null;
+                                  clarifyQuestion =
+                                      "Did you mean a specific layout?";
+                                  clarifySuggestion =
+                                      "I can provide additional variations if needed.";
+                                });
+                              },
+                              child: const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: Icon(
+                                  Icons.clear,
+                                  color: Colors.redAccent,
                                 ),
                               ),
-                              MouseRegion(
-                                onEnter: (_) =>
-                                    setState(() => _isImageHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isImageHovered = false),
-                                child: GestureDetector(
-                                  onTap: _pickImage,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: _isImageHovered
-                                          ? Colors.blue.shade100
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Icon(
-                                      Icons.image,
-                                      color: _isImageHovered
-                                          ? Colors.blueAccent
-                                          : Colors.black,
-                                      size: 26,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              MouseRegion(
-                                onEnter: (_) =>
-                                    setState(() => _isSelectHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isSelectHovered = false),
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      currentMode = DrawingMode.select;
-                                    });
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color:
-                                          _isSelectHovered ||
-                                              currentMode == DrawingMode.select
-                                          ? Colors.blue.shade100
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Icon(
-                                      Icons.pan_tool_alt,
-                                      color:
-                                          _isSelectHovered ||
-                                              currentMode == DrawingMode.select
-                                          ? Colors.blueAccent
-                                          : Colors.black,
-                                      size: 24,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              MouseRegion(
-                                onEnter: (_) {
-                                  _popupHideTimer?.cancel();
-                                  setState(() => _isPencilHovered = true);
-                                },
-                                onExit: (_) {
-                                  setState(() => _isPencilHovered = false);
-                                  _popupHideTimer = Timer(
-                                    const Duration(milliseconds: 2000),
-                                    () {
-                                      if (mounted) setState(() {});
-                                    },
-                                  );
-                                },
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      if (currentMode != DrawingMode.pen) {
-                                        currentMode = DrawingMode.pen;
-                                      }
-                                    });
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: _isPencilHovered
-                                          ? Colors.blue.shade100
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Icon(
-                                      Icons.edit,
-                                      color: _isPencilHovered
-                                          ? Colors.blueAccent
-                                          : Colors.black,
-                                      size: 24,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              MouseRegion(
-                                onEnter: (_) =>
-                                    setState(() => _isGenerateHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isGenerateHovered = false),
-                                child: GestureDetector(
-                                  onTap: isGenerating ? null : _generatePreview,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: _isGenerateHovered
-                                          ? Colors.blue.shade100
-                                          : Colors.transparent,
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: _isGenerateHovered
-                                            ? Colors.transparent
-                                            : Colors.black54,
-                                        width: 1.5,
-                                      ),
-                                    ),
-                                    child: isGenerating
-                                        ? const SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Colors.black87,
-                                            ),
-                                          )
-                                        : Icon(
-                                            Icons.arrow_outward,
-                                            color: _isGenerateHovered
-                                                ? Colors.blueAccent
-                                                : Colors.black87,
-                                            size: 20,
-                                          ),
-                                  ),
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
                     ],
                   ),
+
+                  // Bottom generator bar using precisely the new UI
+                  Positioned(
+                    bottom: 30.0,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          height: 48,
+                          decoration: BoxDecoration(
+                        color: isDarkMode
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDarkMode
+                              ? Colors.white24
+                              : Colors.grey.shade400,
+                          width: 1.0,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onEnter: (_) =>
+                                setState(() => _isAddHovered = true),
+                            onExit: (_) =>
+                                setState(() => _isAddHovered = false),
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  points.add(
+                                    DrawingPoint(
+                                      point: const Offset(40, 40),
+                                      secondaryPoint: const Offset(360, 690),
+                                      type: ShapeType.frame,
+                                      paint: Paint()
+                                        ..color = Colors.blueAccent
+                                        ..strokeWidth = 6.0
+                                        ..style = PaintingStyle.stroke,
+                                    ),
+                                  );
+                                });
+                              },
+                              child: Icon(
+                                Icons.add,
+                                color: isDarkMode
+                                    ? Colors.white
+                                    : Colors.black87,
+                                size: 24,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 24),
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onEnter: (_) =>
+                                setState(() => _isSelectHovered = true),
+                            onExit: (_) =>
+                                setState(() => _isSelectHovered = false),
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  currentMode = DrawingMode.select;
+                                });
+                              },
+                              child: Icon(
+                                Icons.pan_tool_alt_outlined,
+                                color: currentMode == DrawingMode.select
+                                    ? Colors.blueAccent
+                                    : (isDarkMode
+                                          ? Colors.white
+                                          : Colors.black87),
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 24),
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onEnter: (_) =>
+                                setState(() => _isImageHovered = true),
+                            onExit: (_) =>
+                                setState(() => _isImageHovered = false),
+                            child: GestureDetector(
+                              onTap: _pickImage,
+                              child: Icon(
+                                Icons.image_outlined,
+                                color: isDarkMode
+                                    ? Colors.white
+                                    : Colors.black87,
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 24),
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onEnter: (_) {
+                              _popupHideTimer?.cancel();
+                              setState(() => _isPencilHovered = true);
+                            },
+                            onExit: (_) {
+                              setState(() => _isPencilHovered = false);
+                              _popupHideTimer = Timer(
+                                const Duration(milliseconds: 0),
+                                () {
+                                  if (mounted) setState(() {});
+                                },
+                              );
+                            },
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  if (currentMode != DrawingMode.pen) {
+                                    currentMode = DrawingMode.pen;
+                                  }
+                                });
+                              },
+                              child: Icon(
+                                Icons.draw_outlined,
+                                color: currentMode == DrawingMode.pen
+                                    ? Colors.blueAccent
+                                    : (isDarkMode
+                                          ? Colors.white
+                                          : Colors.black87),
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 24),
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onEnter: (_) =>
+                                setState(() => _isGenerateHovered = true),
+                            onExit: (_) =>
+                                setState(() => _isGenerateHovered = false),
+                            child: GestureDetector(
+                              onTap: isGenerating ? null : _generatePreview,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isDarkMode
+                                        ? Colors.white
+                                        : Colors.black87,
+                                    width: 1.2,
+                                  ),
+                                ),
+                                child: isGenerating
+                                    ? SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: isDarkMode
+                                              ? Colors.white
+                                              : Colors.black87,
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.arrow_outward,
+                                        color: isDarkMode
+                                            ? Colors.white
+                                            : Colors.black87,
+                                        size: 16,
+                                      ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    _buildStyleTab(),
+                  ],
+                ),
+              ),
                   if (_showDrawTools)
                     Positioned(
-                      bottom: 90,
+                      bottom: 78,
                       child: MouseRegion(
                         onEnter: (_) {
                           _popupHideTimer?.cancel();
@@ -1188,26 +1147,35 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                         onExit: (_) {
                           setState(() => _isPopupHovered = false);
                           _popupHideTimer = Timer(
-                            const Duration(milliseconds: 300),
+                            const Duration(milliseconds: 0),
                             () {
                               if (mounted) setState(() {});
                             },
                           );
                         },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 12.0),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 12,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: isDarkMode
+                                ? const Color(0xFF2A2A2A)
+                                : Colors.white,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.black12),
-                            boxShadow: const [
+                            border: Border.all(
+                              color: isDarkMode
+                                  ? Colors.white24
+                                  : Colors.grey.shade400,
+                              width: 1.0,
+                            ),
+                            boxShadow: [
                               BoxShadow(
-                                color: Colors.black12,
-                                blurRadius: 10,
-                                offset: Offset(0, 4),
+                                color: Colors.black.withOpacity(0.08),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
                               ),
                             ],
                           ),
@@ -1215,6 +1183,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               MouseRegion(
+                                cursor: SystemMouseCursors.click,
                                 hitTestBehavior: HitTestBehavior.opaque,
                                 onEnter: (_) =>
                                     setState(() => _isRectHovered = true),
@@ -1251,7 +1220,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                             ? Colors.blue
                                             : _isRectHovered
                                             ? Colors.blueAccent
-                                            : Colors.black87,
+                                            : (isDarkMode ? Colors.white : Colors.black87),
                                       ),
                                     ),
                                   ),
@@ -1259,6 +1228,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                               ),
                               const SizedBox(width: 16),
                               MouseRegion(
+                                cursor: SystemMouseCursors.click,
                                 hitTestBehavior: HitTestBehavior.opaque,
                                 onEnter: (_) =>
                                     setState(() => _isButtonHovered = true),
@@ -1293,7 +1263,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                             ? Colors.blue
                                             : _isButtonHovered
                                             ? Colors.blueAccent
-                                            : Colors.black87,
+                                            : (isDarkMode ? Colors.white : Colors.black87),
                                       ),
                                     ),
                                   ),
@@ -1301,6 +1271,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                               ),
                               const SizedBox(width: 16),
                               MouseRegion(
+                                cursor: SystemMouseCursors.click,
                                 hitTestBehavior: HitTestBehavior.opaque,
                                 onEnter: (_) {},
                                 onExit: (_) {},
@@ -1331,7 +1302,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                         size: 24,
                                         color: currentMode == DrawingMode.text
                                             ? Colors.blue
-                                            : Colors.black87,
+                                            : (isDarkMode ? Colors.white : Colors.black87),
                                       ),
                                     ),
                                   ),
@@ -1342,6 +1313,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                         ),
                       ),
                     ),
+                  ),
                   if (isClarifying)
                     Positioned(
                       right: 150,
@@ -1371,40 +1343,62 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
           // Right Side: Website Preview in a phone frame
           Expanded(
             child: Container(
-              color: const Color(
-                0xFF1E1E1E,
-              ), // Dark background matching the right image
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Center(child: _buildPhoneMockup()),
-                  if (_showColorPicker)
-                    Positioned(
-                      left: _colorPickerPosition.dx,
-                      top: _colorPickerPosition.dy,
-                      child: GestureDetector(
-                        onPanUpdate: (details) {
-                          setState(() {
-                            _colorPickerPosition += details.delta;
-                          });
-                        },
-                        child: LiveColorPicker(
-                          initialColor: _currentColor,
-                          onColorChanged: (newColor) {
-                            setState(() {
-                              _currentColor = newColor;
-                            });
-                            updatePreviewColor(
-                              'rgba(${newColor.red}, ${newColor.green}, ${newColor.blue}, ${(newColor.alpha / 255.0).toStringAsFixed(2)})',
-                            );
-                          },
-                          onClose: () {
-                            setState(() => _showColorPicker = false);
-                          },
+              color: isDarkMode
+                  ? const Color(0xFF1E1E1E)
+                  : const Color(
+                      0xFFF0F0F0,
+                    ), // Light gray in light mode, dark otherwise
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final phoneWidth = 320.0;
+                  final phoneHeight = 650.0;
+                  final phoneLeft = (constraints.maxWidth - phoneWidth) / 2;
+                  final phoneTop = (constraints.maxHeight - phoneHeight) / 2;
+
+                  return Stack(
+                    fit: StackFit.expand,
+                    clipBehavior: Clip.none,
+                    children: [
+                      Center(child: _buildPhoneMockup()),
+                      if (_showColorPicker)
+                        Positioned(
+                          left: phoneLeft - 260 + _colorPickerPosition.dx,
+                          top: (phoneTop + _colorPickerPosition.dy - 100).clamp(10.0, constraints.maxHeight - 350.0),
+                          child: Material(
+                            type: MaterialType.transparency,
+                            child: LiveColorPicker(
+                              initialColor: _currentColor,
+                              onDrag: (details) {
+                                setState(() {
+                                  _colorPickerPosition += details.delta;
+                                });
+                              },
+                              onColorChanged: (newColor) {
+                                setState(() {
+                                  _currentColor = newColor;
+                                });
+                                updatePreviewColor(
+                                  'rgba(${newColor.red}, ${newColor.green}, ${newColor.blue}, ${(newColor.alpha / 255.0).toStringAsFixed(2)})',
+                                );
+                              },
+                              onClose: () {
+                                setState(() => _showColorPicker = false);
+                              },
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                ],
+                      if (_showPrunePopup)
+                        Positioned(
+                          left: phoneLeft + _prunePosition.dx - 125,
+                          top: phoneTop + _prunePosition.dy,
+                          child: Material(
+                            type: MaterialType.transparency,
+                            child: _buildPrunePopup(),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -1413,231 +1407,582 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     );
   }
 
-  Widget _buildAIPopup() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutCubic,
-      width: 280,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 24,
-            offset: const Offset(0, 12),
+  Widget _buildStyleTab() {
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.bottomCenter,
+      children: [
+        Container(
+          height: 48,
+          decoration: BoxDecoration(
+            color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
+              width: 1.0,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-          BoxShadow(
-            color: Colors.blue.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        border: Border.all(color: Colors.grey.withOpacity(0.1)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.auto_awesome,
-                  color: Colors.blueAccent,
-                  size: 16,
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                onEnter: (_) {
+                  _stylePopupHideTimer?.cancel();
+                  setState(() => _isStyleHovered = true);
+                },
+                onExit: (_) {
+                  setState(() => _isStyleHovered = false);
+                  _stylePopupHideTimer = Timer(const Duration(milliseconds: 0), () {
+                    if (mounted) setState(() {});
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isDarkMode ? Colors.white12 : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    currentStyle,
+                    style: TextStyle(
+                      color: isDarkMode ? Colors.white : Colors.black87,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ),
               ),
-              const SizedBox(width: 10),
-              const Text(
-                "AI Assistant",
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  color: Colors.black87,
+              const SizedBox(width: 12),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                onEnter: (_) => setState(() => _isPlusHovered = true),
+                onExit: (_) => setState(() => _isPlusHovered = false),
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _isAddingStyle = !_isAddingStyle;
+                    });
+                  },
+                  child: Icon(
+                    Icons.add,
+                    color: _isPlusHovered ? Colors.blue : (isDarkMode ? Colors.white : Colors.black87),
+                    size: 20,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          Text(
-            clarifyQuestion.isNotEmpty
-                ? clarifyQuestion
-                : "Hmm, I'm not quite sure what you sketched here.",
-            style: const TextStyle(
-              color: Colors.black87,
-              fontSize: 14,
-              height: 1.5,
-              fontWeight: FontWeight.w500,
+        ),
+        if (_showStylePopup && !_isAddingStyle)
+          Positioned(
+            bottom: 48,
+            child: MouseRegion(
+              onEnter: (_) {
+                _stylePopupHideTimer?.cancel();
+                setState(() => _isStyleOptionsHovered = true);
+              },
+              onExit: (_) {
+                setState(() => _isStyleOptionsHovered = false);
+                _stylePopupHideTimer = Timer(const Duration(milliseconds: 0), () {
+                  if (mounted) setState(() {});
+                });
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
+                    width: 1.0,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: availableStyles.map((style) {
+                    final isSelected = style == currentStyle;
+                    return MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            currentStyle = style;
+                            _isStyleHovered = false;
+                            _isStyleOptionsHovered = false;
+                          });
+                        },
+                        child: Container(
+                          width: 120,
+                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                          color: isSelected 
+                              ? (isDarkMode ? Colors.white12 : Colors.blue.shade50)
+                              : Colors.transparent,
+                          child: Text(
+                            style,
+                            style: TextStyle(
+                              color: isSelected 
+                                  ? Colors.blueAccent 
+                                  : (isDarkMode ? Colors.white : Colors.black87),
+                              fontSize: 14,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
             ),
           ),
-          if (clarifySuggestion.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
+        ),
+        if (_isAddingStyle)
+          Positioned(
+            bottom: 60,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.grey.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.grey.shade200),
+                color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
+                  width: 1.0,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 12, offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.lightbulb_outline,
-                    color: Colors.amber.shade600,
-                    size: 16,
+                  Container(
+                    width: 150,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isDarkMode ? Colors.white12 : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: TextField(
+                      controller: _customStyleController,
+                      autofocus: true,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isDarkMode ? Colors.white : Colors.black87,
+                      ),
+                      decoration: const InputDecoration(
+                        hintText: "Describe the style",
+                        hintStyle: TextStyle(fontSize: 14, color: Colors.grey),
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      onSubmitted: (val) {
+                        if (val.trim().isNotEmpty) {
+                          setState(() {
+                            availableStyles.add(val.trim());
+                            currentStyle = val.trim();
+                            _isAddingStyle = false;
+                            _customStyleController.clear();
+                          });
+                        }
+                      },
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      clarifySuggestion,
-                      style: TextStyle(
-                        color: Colors.grey.shade800,
-                        fontSize: 12,
-                        height: 1.4,
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () {
+                        final val = _customStyleController.text;
+                        if (val.trim().isNotEmpty) {
+                          setState(() {
+                            availableStyles.add(val.trim());
+                            currentStyle = val.trim();
+                            _isAddingStyle = false;
+                            _customStyleController.clear();
+                          });
+                        } else {
+                          setState(() {
+                            _isAddingStyle = false;
+                          });
+                        }
+                      },
+                      child: Icon(
+                        Icons.add_circle_outline,
+                        color: isDarkMode ? Colors.white : Colors.black87,
+                        size: 24,
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-          ],
-          const SizedBox(height: 16),
-          TextField(
-            controller: _aiReplyController,
-            decoration: InputDecoration(
-              hintText: "Reply to clarify...",
-              hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-              filled: true,
-              fillColor: Colors.grey.shade50,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade200),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Colors.blueAccent),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-            ),
-            style: const TextStyle(fontSize: 13),
-            maxLines: 2,
-            minLines: 1,
-            textInputAction: TextInputAction.send,
-            onSubmitted: (val) {
-              setState(() {
-                isClarifying = false;
-                _generatePreview(userReply: val);
-                _aiReplyController.clear();
-              });
-            },
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: GestureDetector(
-                    onTap: () => setState(() {
-                      isClarifying = false;
-                      _aiReplyController.clear();
-                    }),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.red.shade100),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.close,
-                            color: Colors.red.shade400,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            "Cancel",
-                            style: TextStyle(
-                              color: Colors.red.shade400,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
+      ],
+    );
+  }
+
+  Widget _buildAIPopup() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      width: 280,
+      decoration: BoxDecoration(
+        color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 15,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 24.0),
+                  child: Text(
+                    clarifyQuestion.isNotEmpty
+                        ? clarifyQuestion
+                        : "What's the purpose of the\nbutton at the bottom?",
+                    style: TextStyle(
+                      fontStyle: FontStyle.italic,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: isDarkMode ? Colors.white : Colors.black87,
+                      height: 1.2,
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: GestureDetector(
-                    onTap: () {
+                const SizedBox(height: 20),
+                if (clarifySuggestion.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isDarkMode
+                          ? const Color(0xFF3B487A)
+                          : const Color(0xFFE2E7FF),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.auto_awesome,
+                          color: isDarkMode
+                              ? Colors.white70
+                              : const Color(0xFF3B487A),
+                          size: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            clarifySuggestion,
+                            style: TextStyle(
+                              color: isDarkMode ? Colors.white : Colors.black87,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                Container(
+                  color: isDarkMode
+                      ? const Color(0xFF3A3A3A)
+                      : const Color(0xFFF7F7F7),
+                  child: TextField(
+                    controller: _aiReplyController,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.only(
+                        top: 12,
+                        bottom: 8,
+                        left: 8,
+                        right: 8,
+                      ),
+                      border: UnderlineInputBorder(
+                        borderSide: BorderSide(
+                          color: isDarkMode ? Colors.white54 : Colors.black38,
+                        ),
+                      ),
+                      enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(
+                          color: isDarkMode ? Colors.white54 : Colors.black38,
+                        ),
+                      ),
+                      focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(
+                          color: isDarkMode ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDarkMode ? Colors.white : Colors.black,
+                    ),
+                    onSubmitted: (val) {
                       setState(() {
                         isClarifying = false;
-                        _generatePreview(userReply: _aiReplyController.text);
+                        _generatePreview(userReply: val);
                         _aiReplyController.clear();
                       });
                     },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Colors.blueAccent, Colors.blue.shade600],
-                        ),
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.blueAccent.withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.check, color: Colors.white, size: 18),
-                          SizedBox(width: 6),
-                          Text(
-                            "Confirm",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
                 ),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () => setState(() {
+                          isClarifying = false;
+                          _aiReplyController.clear();
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isDarkMode
+                                  ? Colors.white54
+                                  : Colors.black54,
+                              width: 2,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.close,
+                            size: 20,
+                            color: isDarkMode ? Colors.white70 : Colors.black54,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            isClarifying = false;
+                            _generatePreview(
+                              userReply: _aiReplyController.text,
+                            );
+                            _aiReplyController.clear();
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isDarkMode
+                                  ? Colors.white54
+                                  : Colors.black54,
+                              width: 2,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.arrow_forward,
+                            size: 20,
+                            color: isDarkMode ? Colors.white70 : Colors.black54,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Positioned(
+            top: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: const BoxDecoration(
+                color: Color(0xFF5A7CFF),
+                borderRadius: BorderRadius.only(
+                  topRight: Radius.circular(20),
+                  bottomLeft: Radius.circular(8),
+                ),
               ),
-            ],
+              child: const Text(
+                "1/3",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildPrunePopup() {
+    return Container(
+      width: 250,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.blue.shade300, width: 1.5),
+        boxShadow: const [
+          BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Describe the change to make",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87),
+              ),
+              InkWell(
+                onTap: () => setState(() => _showPrunePopup = false),
+                child: const Icon(Icons.close, size: 16, color: Colors.black54),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            height: 80,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Stack(
+              children: [
+                TextField(
+                  controller: _pruneController,
+                  maxLines: null,
+                  style: const TextStyle(fontSize: 13, color: Colors.black54),
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                    hintText: "Make it shorter , black outline, transparent , black text curved edges",
+                    hintStyle: TextStyle(color: Colors.black38),
+                  ),
+                ),
+                Positioned(
+                  bottom: -4,
+                  right: -4,
+                  child: InkWell(
+                    onTap: _sendPruneRequest,
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.arrow_circle_right_outlined, size: 24, color: Colors.black),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sendPruneRequest() async {
+    if (_pruneController.text.trim().isEmpty) return;
+    final instruction = _pruneController.text.trim();
+    setState(() {
+      _showPrunePopup = false;
+      isGenerating = true; 
+      hasGenerated = false; 
+    });
+
+    final promptText = StringBuffer();
+    promptText.writeln("You are an expert AI layout editor.");
+    promptText.writeln("Look at the requested changes. The user has Double-Clicked a specific HTML element in the preview UI, marked with `data-ai-target=\"true\"`.");
+    promptText.writeln("User Instruction: \"$instruction\".");
+    promptText.writeln("Modify ONLY that specific targeted element to achieve the required design changes.");
+    promptText.writeln("CRITICAL: Output ONLY the full updated HTML structure matching the user's styling request, wrapped in a markdown ```html block. Do not use JSON or output any other text.");
+    promptText.writeln("Here is the FULL HTML. Find the element with data-ai-target='true' and modify it:\n\n```html\n$_pruneComponentHtml\n```");
+
+    try {
+      final response = await http.post(
+        Uri.parse(backendApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'promptText': promptText.toString(),
+          'base64Image': "", 
+          'isInitialGeneration': false,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final jsonResponse = jsonDecode(response.body);
+        String text = jsonResponse['text'] ?? "";
+        
+        final htmlRegex = RegExp(r'```html\s*(.*?)\s*```', dotAll: true);
+        final match = htmlRegex.firstMatch(text);
+        if (match != null) {
+          text = match.group(1)!;
+        } else {
+          text = text.replaceAll('```', '').trim();
+        }
+
+        if (mounted) {
+          setState(() {
+             generatedHtml = text;
+             hasGenerated = true;
+             isGenerating = false;
+             _pruneController.clear();
+          });
+        }
+      }
+    } catch(e) {
+      debugPrint("Error updating component: $e");
+    }
   }
 
   Widget _buildPhoneMockup() {
@@ -1657,6 +2002,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         ],
       ),
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           // Inner Screen
           Positioned.fill(
@@ -1751,6 +2097,21 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       }
     });
 
+    document.addEventListener('dblclick', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      let target = e.target;
+      document.querySelectorAll('[data-ai-target]').forEach(el => delete el.dataset.aiTarget);
+      target.dataset.aiTarget = "true";
+      window.parent.postMessage(JSON.stringify({
+        type: 'DOUBLE_CLICK_COMPONENT',
+        targetHtml: target.outerHTML,
+        fullHtml: document.documentElement.outerHTML,
+        x: e.clientX,
+        y: e.clientY
+      }), '*');
+    });
+
     document.addEventListener('click', function(e) {
       e.preventDefault();
       e.stopPropagation();
@@ -1791,9 +2152,15 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         onColorRequest: (colorStr, x, y) {
           setState(() {
             _currentColor = _parseCssColor(colorStr);
-            // Default position outside the mockup boundaries, user can move it
-            _colorPickerPosition = const Offset(40, 40);
+            _colorPickerPosition = Offset(0, y);
             _showColorPicker = true;
+          });
+        },
+        onDoubleClickComponent: (targetHtml, fullHtml, x, y) {
+          setState(() {
+            _pruneComponentHtml = fullHtml;
+            _prunePosition = Offset(x, y);
+            _showPrunePopup = true;
           });
         },
       );
@@ -1804,6 +2171,189 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       width: double.infinity,
       height: double.infinity,
       child: _cachedLivePreview!,
+    );
+  }
+
+  Widget _buildSidebar() {
+    final bgColor = isDarkMode
+        ? const Color.fromARGB(255, 34, 32, 39)
+        : const Color(0xFFF5F5F5);
+    final textColor = isDarkMode ? Colors.white : Colors.black87;
+    final iconColor = isDarkMode ? Colors.white70 : Colors.black54;
+    final bottomBgColor = isDarkMode ? Colors.black : Colors.white;
+
+    return IntrinsicWidth(
+      child: Container(
+        decoration: BoxDecoration(
+          color: bgColor,
+          border: Border(
+            right: BorderSide(color: Colors.grey.withOpacity(0.2)),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header (Always white bg according to the image mockup)
+            Container(
+              height: 80,
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                mainAxisAlignment: _isSidebarOpen
+                    ? MainAxisAlignment.spaceBetween
+                    : MainAxisAlignment.center,
+                children: [
+                  if (_isSidebarOpen)
+                    Image.asset('assets/icon.png', height: 64),
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _isSidebarOpen = !_isSidebarOpen;
+                        });
+                      },
+                      child: const Icon(
+                        Icons.view_sidebar_outlined,
+                        color: Colors.black87,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Projects List
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 24,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_isSidebarOpen)
+                      Text(
+                        "Projects",
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    if (_isSidebarOpen) const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: _isSidebarOpen
+                          ? MainAxisAlignment.start
+                          : MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.folder_outlined, color: textColor, size: 20),
+                        if (_isSidebarOpen) const SizedBox(width: 12),
+                        if (_isSidebarOpen)
+                          Text(
+                            "Food order",
+                            style: TextStyle(
+                              color: textColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (_isSidebarOpen)
+                      _buildTreeItem("frame_1", textColor, iconColor),
+                    if (_isSidebarOpen)
+                      _buildTreeItem("frame_2", textColor, iconColor),
+                    if (_isSidebarOpen)
+                      _buildTreeItem("frame_3", textColor, iconColor),
+                  ],
+                ),
+              ),
+            ),
+            // Footer Bottom Icons
+            Container(
+              height: 90,
+              color: bottomBgColor,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (_isSidebarOpen)
+                    Tooltip(
+                      message: "Keyboard Shortcuts:\nR - Draw rectangle\nB - Button\nT - Text",
+                      textStyle: TextStyle(
+                        color: isDarkMode ? Colors.white : Colors.black87,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        height: 1.5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
+                          width: 1.0,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: Icon(
+                          Icons.keyboard_alt_outlined,
+                          color: iconColor,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  if (_isSidebarOpen) const SizedBox(width: 20),
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          isDarkMode = !isDarkMode;
+                        });
+                      },
+                      child: Icon(
+                        isDarkMode
+                            ? Icons.nightlight_round
+                            : Icons.light_mode_outlined,
+                        color: iconColor,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTreeItem(String title, Color textColor, Color iconColor) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 14, top: 10),
+      child: Row(
+        children: [
+          Icon(Icons.insert_drive_file_outlined, color: iconColor, size: 16),
+          const SizedBox(width: 10),
+          Text(
+            title,
+            style: TextStyle(color: textColor.withOpacity(0.9), fontSize: 13),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1973,12 +2523,14 @@ class LiveColorPicker extends StatefulWidget {
   final Color initialColor;
   final ValueChanged<Color> onColorChanged;
   final VoidCallback onClose;
+  final GestureDragUpdateCallback? onDrag;
 
   const LiveColorPicker({
     super.key,
     required this.initialColor,
     required this.onColorChanged,
     required this.onClose,
+    this.onDrag,
   });
 
   @override
@@ -2021,28 +2573,32 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
         mainAxisSize: MainAxisSize.min,
         children: [
           // Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  "Solid",
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
+          GestureDetector(
+            onPanUpdate: widget.onDrag,
+            child: Container(
+              color: Colors.transparent, 
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "Solid (Drag to move)",
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
                   ),
-                ),
-                InkWell(
-                  onTap: widget.onClose,
-                  child: const Icon(
-                    Icons.close,
-                    size: 16,
-                    color: Colors.black54,
+                  InkWell(
+                    onTap: widget.onClose,
+                    child: const Icon(
+                      Icons.close,
+                      size: 16,
+                      color: Colors.black54,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const Divider(height: 1, thickness: 1),

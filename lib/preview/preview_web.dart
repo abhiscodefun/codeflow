@@ -6,13 +6,16 @@ import 'dart:ui_web' as ui_web;
 import 'dart:convert';
 
 typedef ColorChangeRequest = void Function(String color, double x, double y);
+typedef DoubleClickRequest = void Function(String targetHtml, String fullHtml, double x, double y);
 
 ColorChangeRequest? _onColorRequest;
+DoubleClickRequest? _onDoubleClickRequest;
 html.IFrameElement? _currentIframe;
 bool _isListenerAdded = false;
 
-Widget buildLivePreview(String htmlContent, {ColorChangeRequest? onColorRequest}) {
+Widget buildLivePreview(String htmlContent, {ColorChangeRequest? onColorRequest, DoubleClickRequest? onDoubleClickComponent}) {
   _onColorRequest = onColorRequest;
+  _onDoubleClickRequest = onDoubleClickComponent;
   final id = 'generated-html-view-${DateTime.now().millisecondsSinceEpoch}';
 
   ui_web.platformViewRegistry.registerViewFactory(id, (int viewId) {
@@ -36,6 +39,12 @@ Widget buildLivePreview(String htmlContent, {ColorChangeRequest? onColorRequest}
             final y = (data['y'] as num).toDouble();
             _onColorRequest!(data['color'].toString(), x, y);
           }
+        } else if (data['type'] == 'DOUBLE_CLICK_COMPONENT') {
+          if (_onDoubleClickRequest != null) {
+            final x = (data['x'] as num).toDouble();
+            final y = (data['y'] as num).toDouble();
+            _onDoubleClickRequest!(data['targetHtml'].toString(), data['fullHtml'].toString(), x, y);
+          }
         }
       } else if (event.data is String) {
         try {
@@ -45,6 +54,12 @@ Widget buildLivePreview(String htmlContent, {ColorChangeRequest? onColorRequest}
               final x = (data['x'] as num).toDouble();
               final y = (data['y'] as num).toDouble();
               _onColorRequest!(data['color'].toString(), x, y);
+            }
+          } else if (data['type'] == 'DOUBLE_CLICK_COMPONENT') {
+            if (_onDoubleClickRequest != null) {
+              final x = (data['x'] as num).toDouble();
+              final y = (data['y'] as num).toDouble();
+              _onDoubleClickRequest!(data['targetHtml'].toString(), data['fullHtml'].toString(), x, y);
             }
           }
         } catch (_) {}

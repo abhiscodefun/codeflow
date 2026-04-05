@@ -1,0 +1,144 @@
+import 'package:flutter/material.dart';
+import 'autodraw_service.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      home: CompilerCanvas(),
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+class CompilerCanvas extends StatefulWidget {
+  const CompilerCanvas({super.key});
+
+  @override
+  State<CompilerCanvas> createState() => _CompilerCanvasState();
+}
+
+class _CompilerCanvasState extends State<CompilerCanvas> {
+  bool isDrawing = false;
+  List<Offset?> points = [];
+  final AutodrawService _autodrawService = AutodrawService();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('VISUAL COMPILER',style: TextStyle(color: Color.fromARGB(255, 251, 251, 251),fontSize: 15),),backgroundColor: const Color.fromARGB(248, 0, 0, 0),foregroundColor: const Color.fromARGB(255, 255, 255, 255),),
+      body: Column(
+        children: [
+          
+          Expanded(
+            flex: 6,
+            child: GestureDetector(
+              onPanUpdate: (details) => setState(() {
+                isDrawing = true;
+                points.add(details.localPosition);
+              }),
+              onPanEnd: (details) async {
+                setState(() {
+                  isDrawing = false;
+                });
+                points.add(null);
+
+                // Process points into strokes for Autodraw API
+                List<List<int>> strokesX = [];
+                List<List<int>> strokesY = [];
+
+                List<int> currentStrokeX = [];
+                List<int> currentStrokeY = [];
+
+                for (var point in points) {
+                  if (point == null) {
+                    if (currentStrokeX.isNotEmpty) {
+                      strokesX.add(currentStrokeX);
+                      strokesY.add(currentStrokeY);
+                      currentStrokeX = [];
+                      currentStrokeY = [];
+                    }
+                  } else {
+                    currentStrokeX.add(point.dx.toInt());
+                    currentStrokeY.add(point.dy.toInt());
+                  }
+                }
+                // Check if there's a loose stroke at the end (though we added null)
+                if (currentStrokeX.isNotEmpty) {
+                  strokesX.add(currentStrokeX);
+                  strokesY.add(currentStrokeY);
+                }
+
+                if (strokesX.isNotEmpty) {
+                  print("Recognizing shape...");
+                  // Use screen size or a fixed large canvas size for context
+                  final size = MediaQuery.of(context).size;
+                  String? result = await _autodrawService.recognizeShape(
+                    strokesX,
+                    strokesY,
+                    size.width.toInt(),
+                    size.height.toInt(),
+                  );
+
+                  if (result != null) {
+                    print("Detected: $result");
+                  } else {
+                    print("Could not detect shape.");
+                  }
+                }
+              },
+              child: CustomPaint(
+                painter: DrawShape(points),
+                size: Size.infinite,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Container(
+              width: double.infinity,
+              color: const Color.fromARGB(255, 25, 25, 25),
+              child: Center(
+                child: Text(
+                  isDrawing ? 'Drawing' : 'Draw any shape',
+                  style: const TextStyle(
+                    color: Color.fromARGB(255, 204, 255, 0),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class DrawShape extends CustomPainter {
+  final List<Offset?> points;
+  const DrawShape(this.points);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color.fromARGB(255, 1, 31, 255)
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+
+    for (int i = 0; i < points.length - 1; i++) {
+      if (points[i] != null && points[i + 1] != null) {
+        canvas.drawLine(points[i]!, points[i + 1]!, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    return true;
+  }
+}
