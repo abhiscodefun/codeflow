@@ -65,8 +65,11 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   String generatedHtml = "";
 
   bool isClarifying = false;
-  String clarifyQuestion = "";
-  String clarifySuggestion = "";
+  List<Map<String, dynamic>> ambiguities = [];
+  double _leftPanelFraction = 0.5;
+  int currentAmbiguityIndex = 0;
+  String get clarifyQuestion => ambiguities.isNotEmpty ? (ambiguities[currentAmbiguityIndex]['question']?.toString() ?? "") : "";
+  String get clarifySuggestion => ambiguities.isNotEmpty ? (ambiguities[currentAmbiguityIndex]['suggestion']?.toString() ?? "") : "";
 
   DrawingMode currentMode = DrawingMode.pen;
   bool _isPencilHovered = false;
@@ -218,16 +221,20 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
 
     if (isInitialGeneration) {
       promptText.writeln(
-        "6. CLARIFICATION PHASE: You must NOT generate HTML yet. Analyze the provided wireframe/sketch. Identify any ambiguous placeholders like 'Enter text' or 'Button' and ask the user what they should be. Be extremely concise. Do not blabber. Ask exactly what you are doubtful about in 1-2 short sentences maximum. Output ONLY a JSON object exactly like this:\n"
+        "6. CLARIFICATION PHASE: You must NOT generate HTML yet. Analyze the provided wireframe/sketch. Identify any ambiguous placeholders like 'Enter text' or 'Button'. Ask about ambiguities ONE BY ONE. Identify the single most important ambiguity and ask ONLY that one. Output ONLY a JSON object exactly like this:\n"
         '{\n'
         '  "type": "clarify",\n'
-        '  "question": "[Your short, concise question about your doubt]",\n'
-        '  "suggestion": "[A very brief design suggestion]"\n'
+        '  "ambiguities": [\n'
+        '    {\n'
+        '      "question": "[Short, single concise question]",\n'
+        '      "suggestion": "[Brief design suggestion]"\n'
+        '    }\n'
+        '  ]\n'
         '}\n',
       );
     } else {
       promptText.writeln(
-        "6. GENERATION PHASE: The user has clarified their intent. Output ONLY the HTML code wrapped in a markdown ```html block. DO NOT use JSON.",
+        "6. GENERATION PHASE: The user has clarified their intent. If there is STILL a critical ambiguity that must be resolved before generating HTML, you may output the clarify JSON again with the NEXT single ambiguity. Otherwise, if you have enough information, output ONLY the HTML code wrapped in a markdown ```html block. DO NOT use JSON.",
       );
     }
 
@@ -389,21 +396,27 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
 
     if (mounted) {
       if (htmlResponse.contains('"clarify"') &&
-          htmlResponse.contains('"question"')) {
+          htmlResponse.contains('"ambiguities"')) {
         try {
           int start = htmlResponse.indexOf('{');
           int end = htmlResponse.lastIndexOf('}');
           if (start != -1 && end != -1 && end > start) {
             String jsonStr = htmlResponse.substring(start, end + 1);
             final decoded = jsonDecode(jsonStr) as Map<String, dynamic>;
+            final list = decoded['ambiguities'] as List<dynamic>?;
             setState(() {
+              if (list != null && list.isNotEmpty) {
+                ambiguities = List<Map<String, dynamic>>.from(list);
+              } else {
+                ambiguities = [
+                  {
+                    "question": "I'm having trouble understanding this sketch.",
+                    "suggestion": "Could you add some text labels indicating what these elements are?"
+                  }
+                ];
+              }
+              currentAmbiguityIndex = 0;
               isClarifying = true;
-              clarifyQuestion =
-                  decoded['question']?.toString() ??
-                  "I'm having trouble understanding this sketch.";
-              clarifySuggestion =
-                  decoded['suggestion']?.toString() ??
-                  "Could you add some text labels indicating what these elements are?";
               isGenerating = false;
             });
             return;
@@ -414,12 +427,41 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
 
         // Fallback catch block logic
         setState(() {
+          ambiguities = [
+            {
+              "question": "This sketch looks a bit abstract.",
+              "suggestion": "Can you describe what layout you're aiming for?"
+            }
+          ];
+          currentAmbiguityIndex = 0;
           isClarifying = true;
-          clarifyQuestion = "This sketch looks a bit abstract.";
-          clarifySuggestion = "Can you describe what layout you're aiming for?";
           isGenerating = false;
         });
         return;
+      }
+
+      // Handle old legacy fallback just in case LLM ignored prompt
+      if (htmlResponse.contains('"clarify"') && htmlResponse.contains('"question"')) {
+        try {
+          int start = htmlResponse.indexOf('{');
+          int end = htmlResponse.lastIndexOf('}');
+          if (start != -1 && end != -1 && end > start) {
+            String jsonStr = htmlResponse.substring(start, end + 1);
+            final decoded = jsonDecode(jsonStr) as Map<String, dynamic>;
+            setState(() {
+              ambiguities = [
+                {
+                  "question": decoded['question']?.toString() ?? "I'm having trouble understanding this sketch.",
+                  "suggestion": decoded['suggestion']?.toString() ?? "Could you add some text labels indicating what these elements are?"
+                }
+              ];
+              currentAmbiguityIndex = 0;
+              isClarifying = true;
+              isGenerating = false;
+            });
+            return;
+          }
+        } catch (e) {}
       }
 
       setState(() {
@@ -528,6 +570,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
           _buildSidebar(),
           // Left side: Drawable canvas and bottom prompt
           Expanded(
+            flex: (_leftPanelFraction * 100).toInt(),
             child: Container(
               color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
               child: Stack(
@@ -928,10 +971,8 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                   uploadedImages.clear();
                                   _imageCounter = 0;
                                   _editingElement = null;
-                                  clarifyQuestion =
-                                      "Did you mean a specific layout?";
-                                  clarifySuggestion =
-                                      "I can provide additional variations if needed.";
+                                  ambiguities.clear();
+                                  currentAmbiguityIndex = 0;
                                 });
                               },
                               child: const Padding(
@@ -1062,7 +1103,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                             onExit: (_) {
                               setState(() => _isPencilHovered = false);
                               _popupHideTimer = Timer(
-                                const Duration(milliseconds: 0),
+                                const Duration(milliseconds: 2000),
                                 () {
                                   if (mounted) setState(() {});
                                 },
@@ -1147,7 +1188,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                         onExit: (_) {
                           setState(() => _isPopupHovered = false);
                           _popupHideTimer = Timer(
-                            const Duration(milliseconds: 0),
+                            const Duration(milliseconds: 2000),
                             () {
                               if (mounted) setState(() {});
                             },
@@ -1157,7 +1198,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                           padding: const EdgeInsets.only(bottom: 12.0),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
+                            horizontal: 24,
                             vertical: 12,
                           ),
                           decoration: BoxDecoration(
@@ -1196,37 +1237,19 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                       _isPopupHovered = false;
                                     });
                                   },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: _isRectHovered
-                                          ? Colors.blue.shade100
-                                          : Colors.transparent,
-                                      border: Border.all(
-                                        color:
-                                            currentMode == DrawingMode.rectangle
-                                            ? Colors.blue
-                                            : Colors.transparent,
-                                        width: 1.5,
-                                      ),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Center(
-                                      child: Icon(
-                                        Icons.crop_square,
-                                        size: 24,
-                                        color:
-                                            currentMode == DrawingMode.rectangle
-                                            ? Colors.blue
-                                            : _isRectHovered
-                                            ? Colors.blueAccent
-                                            : (isDarkMode ? Colors.white : Colors.black87),
-                                      ),
-                                    ),
+                                  child: Icon(
+                                    Icons.crop_square,
+                                    size: 22,
+                                    color:
+                                        currentMode == DrawingMode.rectangle
+                                        ? Colors.blue
+                                        : _isRectHovered
+                                        ? Colors.blueAccent
+                                        : (isDarkMode ? Colors.white : Colors.black87),
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 16),
+                              const SizedBox(width: 24),
                               MouseRegion(
                                 cursor: SystemMouseCursors.click,
                                 hitTestBehavior: HitTestBehavior.opaque,
@@ -1241,35 +1264,18 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                       _isPopupHovered = false;
                                     });
                                   },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: _isButtonHovered
-                                          ? Colors.blue.shade100
-                                          : Colors.transparent,
-                                      border: Border.all(
-                                        color: currentMode == DrawingMode.button
-                                            ? Colors.blue
-                                            : Colors.transparent,
-                                        width: 1.5,
-                                      ),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Center(
-                                      child: Icon(
-                                        Icons.smart_button,
-                                        size: 24,
-                                        color: currentMode == DrawingMode.button
-                                            ? Colors.blue
-                                            : _isButtonHovered
-                                            ? Colors.blueAccent
-                                            : (isDarkMode ? Colors.white : Colors.black87),
-                                      ),
-                                    ),
+                                  child: Icon(
+                                    Icons.smart_button,
+                                    size: 22,
+                                    color: currentMode == DrawingMode.button
+                                        ? Colors.blue
+                                        : _isButtonHovered
+                                        ? Colors.blueAccent
+                                        : (isDarkMode ? Colors.white : Colors.black87),
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 16),
+                              const SizedBox(width: 24),
                               MouseRegion(
                                 cursor: SystemMouseCursors.click,
                                 hitTestBehavior: HitTestBehavior.opaque,
@@ -1282,29 +1288,12 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                       _isPopupHovered = false;
                                     });
                                   },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: currentMode == DrawingMode.text
-                                          ? Colors.blue.shade100
-                                          : Colors.transparent,
-                                      border: Border.all(
-                                        color: currentMode == DrawingMode.text
-                                            ? Colors.blue
-                                            : Colors.transparent,
-                                        width: 1.5,
-                                      ),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Center(
-                                      child: Icon(
-                                        Icons.text_fields,
-                                        size: 24,
-                                        color: currentMode == DrawingMode.text
-                                            ? Colors.blue
-                                            : (isDarkMode ? Colors.white : Colors.black87),
-                                      ),
-                                    ),
+                                  child: Icon(
+                                    Icons.text_fields,
+                                    size: 22,
+                                    color: currentMode == DrawingMode.text
+                                        ? Colors.blue
+                                        : (isDarkMode ? Colors.white : Colors.black87),
                                   ),
                                 ),
                               ),
@@ -1339,9 +1328,28 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
               ),
             ),
           ),
+          MouseRegion(
+            cursor: SystemMouseCursors.resizeLeftRight,
+            child: GestureDetector(
+              onPanUpdate: (details) {
+                setState(() {
+                  double totalWidth = MediaQuery.of(context).size.width - 64; 
+                  if (totalWidth > 0) {
+                    _leftPanelFraction += details.delta.dx / totalWidth;
+                    _leftPanelFraction = _leftPanelFraction.clamp(0.2, 0.8);
+                  }
+                });
+              },
+              child: Container(
+                width: 4,
+                color: isDarkMode ? Colors.white24 : Colors.grey.shade300,
+              ),
+            ),
+          ),
 
           // Right Side: Website Preview in a phone frame
           Expanded(
+            flex: ((1 - _leftPanelFraction) * 100).toInt(),
             child: Container(
               color: isDarkMode
                   ? const Color(0xFF1E1E1E)
@@ -1360,6 +1368,19 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                     clipBehavior: Clip.none,
                     children: [
                       Center(child: _buildPhoneMockup()),
+                      if (_showPrunePopup)
+                        Positioned.fill(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
+                              setState(() {
+                                _showPrunePopup = false;
+                              });
+                              setIframeInteractable(true);
+                            },
+                            child: Container(color: Colors.transparent),
+                          ),
+                        ),
                       if (_showColorPicker)
                         Positioned(
                           left: phoneLeft - 260 + _colorPickerPosition.dx,
@@ -1408,238 +1429,75 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   }
 
   Widget _buildStyleTab() {
-    return Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.bottomCenter,
-      children: [
-        Container(
-          height: 48,
-          decoration: BoxDecoration(
-            color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
-              width: 1.0,
+    return Container(
+        height: 48,
+        decoration: BoxDecoration(
+          color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
+            width: 1.0,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                onEnter: (_) {
-                  _stylePopupHideTimer?.cancel();
-                  setState(() => _isStyleHovered = true);
-                },
-                onExit: (_) {
-                  setState(() => _isStyleHovered = false);
-                  _stylePopupHideTimer = Timer(const Duration(milliseconds: 0), () {
-                    if (mounted) setState(() {});
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: isDarkMode ? Colors.white12 : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    currentStyle,
-                    style: TextStyle(
-                      color: isDarkMode ? Colors.white : Colors.black87,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              MouseRegion(
-                cursor: SystemMouseCursors.click,
-                onEnter: (_) => setState(() => _isPlusHovered = true),
-                onExit: (_) => setState(() => _isPlusHovered = false),
-                child: GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _isAddingStyle = !_isAddingStyle;
-                    });
-                  },
-                  child: Icon(
-                    Icons.add,
-                    color: _isPlusHovered ? Colors.blue : (isDarkMode ? Colors.white : Colors.black87),
-                    size: 20,
-                  ),
-                ),
-              ),
-            ],
-          ),
+          ],
         ),
-        if (_showStylePopup && !_isAddingStyle)
-          Positioned(
-            bottom: 48,
-            child: MouseRegion(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
               onEnter: (_) {
                 _stylePopupHideTimer?.cancel();
-                setState(() => _isStyleOptionsHovered = true);
+                setState(() => _isStyleHovered = true);
               },
               onExit: (_) {
-                setState(() => _isStyleOptionsHovered = false);
-                _stylePopupHideTimer = Timer(const Duration(milliseconds: 0), () {
+                setState(() => _isStyleHovered = false);
+                _stylePopupHideTimer = Timer(const Duration(milliseconds: 2000), () {
                   if (mounted) setState(() {});
                 });
               },
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 12.0),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
-                    width: 1.0,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+                  color: isDarkMode ? Colors.white12 : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: availableStyles.map((style) {
-                    final isSelected = style == currentStyle;
-                    return MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            currentStyle = style;
-                            _isStyleHovered = false;
-                            _isStyleOptionsHovered = false;
-                          });
-                        },
-                        child: Container(
-                          width: 120,
-                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                          color: isSelected 
-                              ? (isDarkMode ? Colors.white12 : Colors.blue.shade50)
-                              : Colors.transparent,
-                          child: Text(
-                            style,
-                            style: TextStyle(
-                              color: isSelected 
-                                  ? Colors.blueAccent 
-                                  : (isDarkMode ? Colors.white : Colors.black87),
-                              fontSize: 14,
-                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                child: Text(
+                  currentStyle.isNotEmpty ? currentStyle[0].toUpperCase() + currentStyle.substring(1) : currentStyle,
+                  style: TextStyle(
+                    color: isDarkMode ? Colors.white : Colors.black87,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
             ),
-          ),
+            const SizedBox(width: 12),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              onEnter: (_) => setState(() => _isPlusHovered = true),
+              onExit: (_) => setState(() => _isPlusHovered = false),
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _isAddingStyle = !_isAddingStyle;
+                  });
+                },
+                child: Icon(
+                  Icons.add,
+                  color: _isPlusHovered ? Colors.blue : (isDarkMode ? Colors.white : Colors.black87),
+                  size: 20,
+                ),
+              ),
+            ),
+          ],
         ),
-        if (_isAddingStyle)
-          Positioned(
-            bottom: 60,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
-                  width: 1.0,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.08),
-                    blurRadius: 12, offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 150,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: isDarkMode ? Colors.white12 : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: TextField(
-                      controller: _customStyleController,
-                      autofocus: true,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: isDarkMode ? Colors.white : Colors.black87,
-                      ),
-                      decoration: const InputDecoration(
-                        hintText: "Describe the style",
-                        hintStyle: TextStyle(fontSize: 14, color: Colors.grey),
-                        border: InputBorder.none,
-                        isDense: true,
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                      onSubmitted: (val) {
-                        if (val.trim().isNotEmpty) {
-                          setState(() {
-                            availableStyles.add(val.trim());
-                            currentStyle = val.trim();
-                            _isAddingStyle = false;
-                            _customStyleController.clear();
-                          });
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: () {
-                        final val = _customStyleController.text;
-                        if (val.trim().isNotEmpty) {
-                          setState(() {
-                            availableStyles.add(val.trim());
-                            currentStyle = val.trim();
-                            _isAddingStyle = false;
-                            _customStyleController.clear();
-                          });
-                        } else {
-                          setState(() {
-                            _isAddingStyle = false;
-                          });
-                        }
-                      },
-                      child: Icon(
-                        Icons.add_circle_outline,
-                        color: isDarkMode ? Colors.white : Colors.black87,
-                        size: 24,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
     );
   }
 
@@ -1667,20 +1525,37 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 24.0),
-                  child: Text(
-                    clarifyQuestion.isNotEmpty
-                        ? clarifyQuestion
-                        : "What's the purpose of the\nbutton at the bottom?",
-                    style: TextStyle(
-                      fontStyle: FontStyle.italic,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: isDarkMode ? Colors.white : Colors.black87,
-                      height: 1.2,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        clarifyQuestion.isNotEmpty
+                            ? clarifyQuestion
+                            : "What's the purpose of the\nbutton at the bottom?",
+                        style: TextStyle(
+                          fontStyle: FontStyle.italic,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w400,
+                          color: isDarkMode ? Colors.white : Colors.black87,
+                          height: 1.2,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (ambiguities.length > 1)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8.0),
+                        child: Text(
+                          "${currentAmbiguityIndex + 1}/${ambiguities.length}",
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isDarkMode ? Colors.white54 : Colors.black54,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 20),
                 if (clarifySuggestion.isNotEmpty)
@@ -1756,9 +1631,23 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                     ),
                     onSubmitted: (val) {
                       setState(() {
-                        isClarifying = false;
-                        _generatePreview(userReply: val);
-                        _aiReplyController.clear();
+                        if (currentAmbiguityIndex < ambiguities.length - 1) {
+                          // save answer? We're ignoring answers temporarily or accumulating them
+                          final answer = val.trim();
+                          if (answer.isNotEmpty) {
+                            _promptController.text += "\nQ: ${clarifyQuestion} -> A: $answer";
+                          }
+                          currentAmbiguityIndex++;
+                          _aiReplyController.clear();
+                        } else {
+                          final answer = val.trim();
+                          if (answer.isNotEmpty) {
+                            _promptController.text += "\nQ: ${clarifyQuestion} -> A: $answer";
+                          }
+                          isClarifying = false;
+                          _generatePreview(userReply: "All questions answered");
+                          _aiReplyController.clear();
+                        }
                       });
                     },
                   ),
@@ -1799,11 +1688,22 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                       child: GestureDetector(
                         onTap: () {
                           setState(() {
-                            isClarifying = false;
-                            _generatePreview(
-                              userReply: _aiReplyController.text,
-                            );
-                            _aiReplyController.clear();
+                            if (currentAmbiguityIndex < ambiguities.length - 1) {
+                              final answer = _aiReplyController.text.trim();
+                              if (answer.isNotEmpty) {
+                                _promptController.text += "\nQ: ${clarifyQuestion} -> A: $answer";
+                              }
+                              currentAmbiguityIndex++;
+                              _aiReplyController.clear();
+                            } else {
+                              final answer = _aiReplyController.text.trim();
+                              if (answer.isNotEmpty) {
+                                _promptController.text += "\nQ: ${clarifyQuestion} -> A: $answer";
+                              }
+                              isClarifying = false;
+                              _generatePreview(userReply: "All questions answered");
+                              _aiReplyController.clear();
+                            }
                           });
                         },
                         child: Container(
@@ -1818,7 +1718,9 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                             ),
                           ),
                           child: Icon(
-                            Icons.arrow_forward,
+                            currentAmbiguityIndex < ambiguities.length - 1
+                                ? Icons.arrow_forward
+                                : Icons.check,
                             size: 20,
                             color: isDarkMode ? Colors.white70 : Colors.black54,
                           ),
@@ -1842,9 +1744,9 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                   bottomLeft: Radius.circular(8),
                 ),
               ),
-              child: const Text(
-                "1/3",
-                style: TextStyle(
+              child: Text(
+                "${currentAmbiguityIndex + 1}/${ambiguities.isNotEmpty ? ambiguities.length : 1}",
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
@@ -1881,7 +1783,10 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87),
               ),
               InkWell(
-                onTap: () => setState(() => _showPrunePopup = false),
+                onTap: () {
+                  setState(() => _showPrunePopup = false);
+                  setIframeInteractable(true);
+                },
                 child: const Icon(Icons.close, size: 16, color: Colors.black54),
               ),
             ],
@@ -1939,6 +1844,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       isGenerating = true; 
       hasGenerated = false; 
     });
+    setIframeInteractable(true);
 
     final promptText = StringBuffer();
     promptText.writeln("You are an expert AI layout editor.");
@@ -2097,9 +2003,14 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       }
     });
 
+    let clickTimer = null;
     document.addEventListener('dblclick', function(e) {
       e.preventDefault();
       e.stopPropagation();
+      if (clickTimer) {
+         clearTimeout(clickTimer);
+         clickTimer = null;
+      }
       let target = e.target;
       document.querySelectorAll('[data-ai-target]').forEach(el => delete el.dataset.aiTarget);
       target.dataset.aiTarget = "true";
@@ -2128,12 +2039,16 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
          currentColor = style.color;
       }
 
-      window.parent.postMessage(JSON.stringify({
-        type: 'OPEN_COLOR_PICKER',
-        color: currentColor,
-        x: e.clientX,
-        y: e.clientY
-      }), '*');
+      if (clickTimer) clearTimeout(clickTimer);
+      clickTimer = setTimeout(function() {
+        clickTimer = null;
+        window.parent.postMessage(JSON.stringify({
+          type: 'OPEN_COLOR_PICKER',
+          color: currentColor,
+          x: e.clientX,
+          y: e.clientY
+        }), '*');
+      }, 250);
     });
   })();
 </script>
@@ -2161,7 +2076,9 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
             _pruneComponentHtml = fullHtml;
             _prunePosition = Offset(x, y);
             _showPrunePopup = true;
+            _showColorPicker = false;
           });
+          setIframeInteractable(false);
         },
       );
     }

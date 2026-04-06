@@ -73,3 +73,11 @@ Widget buildLivePreview(String htmlContent, {ColorChangeRequest? onColorRequest,
 void updatePreviewColor(String color) {
   _currentIframe?.contentWindow?.postMessage(jsonEncode({'type': 'UPDATE_COLOR', 'color': color}), '*');
 }
+
+void setIframeInteractable(bool interactable) {
+  if (interactable) {
+    _currentIframe?.style.pointerEvents = 'auto';
+  } else {
+    _currentIframe?.style.pointerEvents = 'none';
+  }
+}

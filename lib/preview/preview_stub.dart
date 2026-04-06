@@ -14,3 +14,5 @@ Widget buildLivePreview(String htmlContent, {ColorChangeRequest? onColorRequest,
 }
 
 void updatePreviewColor(String color) {}
+
+void setIframeInteractable(bool interactable) {}
