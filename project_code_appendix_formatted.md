@@ -1,3 +1,9 @@
+# Source Code Appendix
+
+This appendix contains the core application code, divided into logical sections highlighting configuration, state management, core AI generation logic, UI components, and the backend Express server.
+
+## Part 1: Frontend Application (Flutter/Dart)
+```dart
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'dart:ui' as ui;
@@ -17,19 +23,17 @@ const String backendApiUrl = 'http://localhost:3000/api/generate';
 const String supabaseUrl = 'https://ldpodxtofvusyvpbxcta.supabase.co';
 const String supabaseAnonKey = 'sb_publishable_jvUUEd1pCdnIrAuUsNovIA_dp-GElV-';
 
-enum ResizeHandle {
-  none,
-  topLeft,
-  topCenter,
-  topRight,
-  centerLeft,
-  centerRight,
-  bottomLeft,
-  bottomCenter,
-  bottomRight,
-}
 
-void main() async {
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: APP INITIALIZATION & CONFIGURATION
+// ============================================================================
+// ============================================================================
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
@@ -43,11 +47,31 @@ void main() async {
   runApp(const MyApp());
 }
 
+
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: MAIN APPLICATION ROOT
+// ============================================================================
+// ============================================================================
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: CORE UI ROUTING: MAIN DASHBOARD LAYOUT & CANVAS
+// ============================================================================
+// ============================================================================
+
+Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Canvas AI Web App',
       debugShowCheckedModeBanner: false,
@@ -61,6 +85,16 @@ class MyApp extends StatelessWidget {
   }
 }
 
+
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: MAIN WORKSPACE SCREEN (STATEFUL WIDGET)
+// ============================================================================
+// ============================================================================
+
 class SketchPreviewScreen extends StatefulWidget {
   const SketchPreviewScreen({super.key});
 
@@ -68,9 +102,18 @@ class SketchPreviewScreen extends StatefulWidget {
   State<SketchPreviewScreen> createState() => _SketchPreviewScreenState();
 }
 
+
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: WORKSPACE STATE MANAGEMENT & VARIABLES
+// ============================================================================
+// ============================================================================
+
 class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   bool isDarkMode = false;
-  bool isDesktopMode = false;
   bool _isSidebarOpen = true;
   List<DrawingPoint> points = [];
   bool hasGenerated = false;
@@ -81,12 +124,8 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   List<Map<String, dynamic>> ambiguities = [];
   double _leftPanelFraction = 0.5;
   int currentAmbiguityIndex = 0;
-  String get clarifyQuestion => ambiguities.isNotEmpty
-      ? (ambiguities[currentAmbiguityIndex]['question']?.toString() ?? "")
-      : "";
-  String get clarifySuggestion => ambiguities.isNotEmpty
-      ? (ambiguities[currentAmbiguityIndex]['suggestion']?.toString() ?? "")
-      : "";
+  String get clarifyQuestion => ambiguities.isNotEmpty ? (ambiguities[currentAmbiguityIndex]['question']?.toString() ?? "") : "";
+  String get clarifySuggestion => ambiguities.isNotEmpty ? (ambiguities[currentAmbiguityIndex]['suggestion']?.toString() ?? "") : "";
 
   DrawingMode currentMode = DrawingMode.pen;
   bool _isPencilHovered = false;
@@ -111,20 +150,27 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       (_popupHideTimer?.isActive ?? false);
 
   final GlobalKey _canvasKey = GlobalKey();
-  final GlobalKey _iframeContainerKey = GlobalKey();
   final TextEditingController _promptController = TextEditingController();
-  final TextEditingController _globalPruneController = TextEditingController();
   final TextEditingController _aiReplyController = TextEditingController();
   final TextEditingController _elementTextController = TextEditingController();
 
   DrawingPoint? _editingElement;
   List<DrawingPoint> _dragChildren = [];
-  Map<DrawingPoint, Rect> _initialChildRects = {};
-  Rect? _initialFrameRect;
-  ResizeHandle _activeResizeHandle = ResizeHandle.none;
 
   int _imageCounter = 0;
   Map<String, String> uploadedImages = {};
+
+  List<String> availableStyles = ['minimal', 'vibrant', 'default'];
+  String currentStyle = 'minimal';
+  bool _isStyleHovered = false;
+  bool _isStyleOptionsHovered = false;
+  Timer? _stylePopupHideTimer;
+  bool _isAddingStyle = false;
+  bool _isPlusHovered = false;
+  final TextEditingController _customStyleController = TextEditingController();
+
+  bool get _showStylePopup => _isStyleHovered || _isStyleOptionsHovered || (_stylePopupHideTimer?.isActive ?? false);
+
   bool _showColorPicker = false;
   Color _currentColor = Colors.white;
   Offset _colorPickerPosition = Offset.zero;
@@ -185,7 +231,17 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     }
   }
 
-  Future<String> _callGemini(
+  
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: AI INTEGRATION: GEMINI API COMMUNICATION PIPELINE
+// ============================================================================
+// ============================================================================
+
+Future<String> _callGemini(
     Uint8List imageBytes,
     String userPrompt,
     String frameMetadata,
@@ -205,15 +261,9 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     promptText.writeln(
       "2. BE SMART: Ensure elements have realistic padding, margins, fonts, colors, and modern border-radii.",
     );
-    if (isDesktopMode) {
-      promptText.writeln(
-        "3. MULTI-SCREEN VIEWPORT RULES: The target output container represents a widescreen DESKTOP BROWSER. The generated layout must be designed for desktop resolutions (e.g. horizontal navigation, wide grids). Make it EXACTLY 100% width and 100% height. If there are MULTIPLE screens, they should all be contained within this single viewport. Each screen should be a full-size absolute container. By default, show the first screen (homepage) and hide the others. Place specific elements inside their respective containers. Prevent horizontal overflow. IMPORTANT DESKTOP LAYOUT RULE: Within any single screen, if elements (like an image, text, and button) are stacked vertically in a column in the mobile sketch, CONVERT that vertical group into a neat horizontal row (e.g. side-by-side flex layout) to properly utilize the wide desktop screen.",
-      );
-    } else {
-      promptText.writeln(
-        "3. MULTI-SCREEN VIEWPORT RULES: The target output container must always be EXACTLY 100% width and 100% height. If there's only 1 screen, just output that screen. If there are MULTIPLE screens, they should all be contained within this single viewport. Each screen should be a full-size absolute container (`width: 100%; height: 100%; position: absolute; top: 0; left: 0; overflow-y: auto; background: #fff;`). By default, show the first screen (homepage) and hide the others (using `display: none;` or similar). Place the specific elements for each screen inside its respective container. ID each screen using its screen name (e.g. `id=\"screen_1\"`). Prevent horizontal overflow inside the screens.",
-      );
-    }
+    promptText.writeln(
+      "3. MULTI-SCREEN VIEWPORT RULES: The target output container must always be EXACTLY 100% width and 100% height. If there's only 1 screen, just output that screen. If there are MULTIPLE screens, they should all be contained within this single viewport. Each screen should be a full-size absolute container (`width: 100%; height: 100%; position: absolute; top: 0; left: 0; overflow-y: auto; background: #fff;`). By default, show the first screen (homepage) and hide the others (using `display: none;` or similar). Place the specific elements for each screen inside its respective container. ID each screen using its screen name (e.g. `id=\"screen_1\"`). Prevent horizontal overflow inside the screens.",
+    );
 
     if (userPrompt.trim().isNotEmpty) {
       promptText.writeln(
@@ -221,14 +271,17 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       );
       promptText.writeln('USER STYLE PROMPT: "$userPrompt"');
     }
+    promptText.writeln(
+      '5. OVERALL DESIGN STYLE: The user selected the styling preset "$currentStyle". Ensure the generated UI strongly embodies this aesthetic (e.g., if vibrant, use bright colors/gradients and bold shadows; if minimal, use lots of whitespace, stark contrasts, and simple borders; if a custom style, follow it literally).',
+    );
     if (frameMetadata.isNotEmpty) {
       promptText.writeln(
-        "4b. FRAME METADATA: Use these exact relative positions (in % of the ${isDesktopMode ? 'desktop' : 'mobile'} screen) for placing the specific elements:\n$frameMetadata",
+        "4b. FRAME METADATA: Use these exact relative positions (in % of the mobile screen) for placing the specific elements:\n$frameMetadata",
       );
     }
     if (uploadedImages.isNotEmpty) {
       promptText.writeln(
-        "5. CRITICAL: PLACED IMAGES DETECTED! There is at least one image in this sketch explicitly marked with a red tag like {IMG_0}. You absolutely MUST insert an <img> tag exactly at its position using the tag string as the src: <img src='{IMG_0}' style='width: 100%; height: 100%; object-fit: cover; border-radius: 12px;' />. IMPORTANT: ALWAYS place the image inside a visible container that has defined bounds so the image does not disappear. FAILURE to use the exact {IMG_0} tag in the src attribute is unacceptable.",
+        "5. CRITICAL: PLACED IMAGES DETECTED! There is at least one image in this sketch explicitly marked with a red tag like {IMG_0}. You absolutely MUST insert an <img> tag exactly at its position using the tag string as the src: <img src='{IMG_0}' style='width: 100%; object-fit: cover; border-radius: 12px; margin-bottom: 10px;' />. FAILURE to use the exact {IMG_0} tag in the src attribute is unacceptable.",
       );
     }
 
@@ -279,19 +332,12 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         text = text.replaceAll(entry.key, entry.value);
       }
 
-      // Extract markdown blocks more robustly
+      // Strip any markdown code blocks completely before checking
       String cleanText = text.trim();
-      final htmlBlockRegex = RegExp(r'```(?:html|xml)\s*([\s\S]*?)```', caseSensitive: false);
-      final genericBlockRegex = RegExp(r'```[a-zA-Z]*\s*([\s\S]*?)```');
-      
-      final htmlMatch = htmlBlockRegex.firstMatch(cleanText);
-      if (htmlMatch != null) {
-        cleanText = (htmlMatch.group(1) ?? cleanText).trim();
-      } else {
-        final genericMatch = genericBlockRegex.firstMatch(cleanText);
-        if (genericMatch != null) {
-          cleanText = (genericMatch.group(1) ?? cleanText).trim();
-        }
+      final codeBlockRegex = RegExp(r'```[a-zA-Z]*\s*([\s\S]*?)```');
+      final match = codeBlockRegex.firstMatch(cleanText);
+      if (match != null) {
+        cleanText = (match.group(1) ?? cleanText).trim();
       }
 
       // Determine if clarification was requested via JSON (or forced initial)
@@ -306,16 +352,12 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       if (!text.toLowerCase().contains('<html') &&
           !text.toLowerCase().contains('<body')) {
         text =
-            '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>::-webkit-scrollbar { display: none; } html, body { margin: 0; padding: 0; width: 100%; height: 100%; -ms-overflow-style: none; scrollbar-width: none; }</style></head><body>\n$text\n</body></html>';
+            '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>::-webkit-scrollbar { display: none; } body { -ms-overflow-style: none; scrollbar-width: none; }</style></head><body style="margin: 0; padding: 0;">\n$text\n</body></html>';
       } else if (!text.contains('::-webkit-scrollbar')) {
-        String styles = '<style>::-webkit-scrollbar { display: none; } html, body { margin: 0; padding: 0; width: 100%; height: 100%; -ms-overflow-style: none; scrollbar-width: none; }</style>';
-        if (text.toLowerCase().contains('<head>')) {
-          text = text.replaceFirst(RegExp(r'<head>', caseSensitive: false), '<head>\n$styles');
-        } else if (text.toLowerCase().contains('<body>')) {
-          text = text.replaceFirst(RegExp(r'<body>', caseSensitive: false), '<body>\n$styles');
-        } else {
-          text = styles + '\n' + text;
-        }
+        text = text.replaceFirst(
+          '<head>',
+          '<head><style>::-webkit-scrollbar { display: none; } body { -ms-overflow-style: none; scrollbar-width: none; }</style>',
+        );
       }
 
       debugPrint(
@@ -328,7 +370,17 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     }
   }
 
-  void _generatePreview({String? userReply}) async {
+  
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: AI INTEGRATION: SKETCH ANALYSIS & PREVIEW GENERATION TRIGGER
+// ============================================================================
+// ============================================================================
+
+void _generatePreview({String? userReply}) async {
     if (points.isEmpty && !hasGenerated) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please sketch something first!")),
@@ -363,8 +415,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
           final String screenName = f.text ?? "screen_${i + 1}";
           metadata += "--- $screenName ---\n";
           for (var p in points) {
-            if (p == f || p.type == ShapeType.line || p.type == ShapeType.frame)
-              continue;
+            if (p == f || p.type == ShapeType.line || p.type == ShapeType.frame) continue;
 
             Rect? pRect;
             if (p.secondaryPoint != null) {
@@ -425,8 +476,8 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     );
 
     if (mounted) {
-      if (htmlResponse.startsWith('{') && 
-          htmlResponse.contains('"clarify"')) {
+      if (htmlResponse.contains('"clarify"') &&
+          htmlResponse.contains('"ambiguities"')) {
         try {
           int start = htmlResponse.indexOf('{');
           int end = htmlResponse.lastIndexOf('}');
@@ -441,9 +492,8 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                 ambiguities = [
                   {
                     "question": "I'm having trouble understanding this sketch.",
-                    "suggestion":
-                        "Could you add some text labels indicating what these elements are?",
-                  },
+                    "suggestion": "Could you add some text labels indicating what these elements are?"
+                  }
                 ];
               }
               currentAmbiguityIndex = 0;
@@ -461,8 +511,8 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
           ambiguities = [
             {
               "question": "This sketch looks a bit abstract.",
-              "suggestion": "Can you describe what layout you're aiming for?",
-            },
+              "suggestion": "Can you describe what layout you're aiming for?"
+            }
           ];
           currentAmbiguityIndex = 0;
           isClarifying = true;
@@ -472,8 +522,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       }
 
       // Handle old legacy fallback just in case LLM ignored prompt
-      if (htmlResponse.contains('"clarify"') &&
-          htmlResponse.contains('"question"')) {
+      if (htmlResponse.contains('"clarify"') && htmlResponse.contains('"question"')) {
         try {
           int start = htmlResponse.indexOf('{');
           int end = htmlResponse.lastIndexOf('}');
@@ -483,13 +532,9 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
             setState(() {
               ambiguities = [
                 {
-                  "question":
-                      decoded['question']?.toString() ??
-                      "I'm having trouble understanding this sketch.",
-                  "suggestion":
-                      decoded['suggestion']?.toString() ??
-                      "Could you add some text labels indicating what these elements are?",
-                },
+                  "question": decoded['question']?.toString() ?? "I'm having trouble understanding this sketch.",
+                  "suggestion": decoded['suggestion']?.toString() ?? "Could you add some text labels indicating what these elements are?"
+                }
               ];
               currentAmbiguityIndex = 0;
               isClarifying = true;
@@ -509,7 +554,17 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     }
   }
 
-  Future<void> _pickImage() async {
+  
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: UTILITY: IMAGE PICKER & SUPABASE UPLOAD
+// ============================================================================
+// ============================================================================
+
+Future<void> _pickImage() async {
     final ImagePicker picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
     if (image != null) {
@@ -597,74 +652,11 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     });
   }
 
-  ResizeHandle _hitTestResizeHandles(Offset pos, Rect bounds) {
-    const double handleSize = 20.0;
-    final double intlx = bounds.left;
-    final double intly = bounds.top;
-    final double inbrx = bounds.right;
-    final double inbry = bounds.bottom;
-
-    if (Rect.fromCenter(
-      center: Offset(intlx, intly),
-      width: handleSize,
-      height: handleSize,
-    ).contains(pos))
-      return ResizeHandle.topLeft;
-    if (Rect.fromCenter(
-      center: Offset(inbrx, intly),
-      width: handleSize,
-      height: handleSize,
-    ).contains(pos))
-      return ResizeHandle.topRight;
-    if (Rect.fromCenter(
-      center: Offset(intlx, inbry),
-      width: handleSize,
-      height: handleSize,
-    ).contains(pos))
-      return ResizeHandle.bottomLeft;
-    if (Rect.fromCenter(
-      center: Offset(inbrx, inbry),
-      width: handleSize,
-      height: handleSize,
-    ).contains(pos))
-      return ResizeHandle.bottomRight;
-
-    if (Rect.fromCenter(
-      center: Offset(bounds.center.dx, intly),
-      width: handleSize,
-      height: handleSize,
-    ).contains(pos))
-      return ResizeHandle.topCenter;
-    if (Rect.fromCenter(
-      center: Offset(bounds.center.dx, inbry),
-      width: handleSize,
-      height: handleSize,
-    ).contains(pos))
-      return ResizeHandle.bottomCenter;
-    if (Rect.fromCenter(
-      center: Offset(intlx, bounds.center.dy),
-      width: handleSize,
-      height: handleSize,
-    ).contains(pos))
-      return ResizeHandle.centerLeft;
-    if (Rect.fromCenter(
-      center: Offset(inbrx, bounds.center.dy),
-      width: handleSize,
-      height: handleSize,
-    ).contains(pos))
-      return ResizeHandle.centerRight;
-
-    return ResizeHandle.none;
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          Row(
+      body: Row(
         children: [
           _buildSidebar(),
           // Left side: Drawable canvas and bottom prompt
@@ -692,11 +684,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                             color: Colors.white,
                             width: 3000,
                             height: 3000,
-                            child: MouseRegion(
-                              cursor: currentMode == DrawingMode.select
-                                  ? SystemMouseCursors.move
-                                  : SystemMouseCursors.basic,
-                              child: GestureDetector(
+                            child: GestureDetector(
                               onTapDown: (details) {
                                 // If editing, tapping outside closes it
                                 if (_editingElement != null) {
@@ -713,61 +701,6 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                 } else if (currentMode == DrawingMode.button) {
                                   _addButtonToCanvas(details.localPosition);
                                 } else if (currentMode == DrawingMode.select) {
-                                  // 1. Check if we are interacting with resize handles of the currently selected element
-                                  if (_selectedFrame != null &&
-                                      _selectedFrame!.secondaryPoint != null) {
-                                    Rect selectedRect = Rect.fromPoints(
-                                      _selectedFrame!.point,
-                                      _selectedFrame!.secondaryPoint!,
-                                    );
-                                    if (_selectedFrame!.type ==
-                                        ShapeType.text) {
-                                      selectedRect = Rect.fromLTWH(
-                                        _selectedFrame!.point.dx,
-                                        _selectedFrame!.point.dy,
-                                        80,
-                                        20,
-                                      );
-                                    }
-
-                                    ResizeHandle hitHandle =
-                                        _hitTestResizeHandles(
-                                          details.localPosition,
-                                          selectedRect,
-                                        );
-                                    if (hitHandle != ResizeHandle.none) {
-                                      _activeResizeHandle = hitHandle;
-                                      _dragStartOffset = details.localPosition;
-                                      _initialFrameRect = selectedRect;
-
-                                      // Save initial rects of all children if it's a frame
-                                      _initialChildRects.clear();
-                                      if (_selectedFrame!.type ==
-                                          ShapeType.frame) {
-                                        for (var child in _dragChildren) {
-                                          if (child.secondaryPoint != null) {
-                                            _initialChildRects[child] =
-                                                Rect.fromPoints(
-                                                  child.point,
-                                                  child.secondaryPoint!,
-                                                );
-                                          } else if (child.type ==
-                                              ShapeType.text) {
-                                            _initialChildRects[child] =
-                                                Rect.fromLTWH(
-                                                  child.point.dx,
-                                                  child.point.dy,
-                                                  80,
-                                                  20,
-                                                );
-                                          }
-                                        }
-                                      }
-                                      return; // Handle interacted, skip selecting new elements
-                                    }
-                                  }
-
-                                  _activeResizeHandle = ResizeHandle.none;
                                   _selectedFrame = null;
                                   _dragChildren.clear();
                                   for (var i = points.length - 1; i >= 0; i--) {
@@ -795,18 +728,19 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                           // Find all elements fully inside the frame
                                           for (var sibling in points) {
                                             if (sibling != p &&
-                                                sibling.secondaryPoint != null &&
-                                                sibling.type != ShapeType.line &&
-                                                sibling.type != ShapeType.frame) {
+                                                sibling.secondaryPoint !=
+                                                    null &&
+                                                sibling.type !=
+                                                    ShapeType.line) {
                                               Rect sRect = Rect.fromPoints(
                                                 sibling.point,
                                                 sibling.secondaryPoint!,
                                               );
-                                              // Only consider fully contained children, not just overlaps
-                                              if (r.intersect(sRect) == sRect) {
+                                              if (r.overlaps(sRect)) {
                                                 _dragChildren.add(sibling);
                                               }
-                                            } else if (sibling.type == ShapeType.text) {
+                                            } else if (sibling.type ==
+                                                ShapeType.text) {
                                               // Approximate text rect
                                               Rect tRect = Rect.fromLTWH(
                                                 sibling.point.dx,
@@ -814,7 +748,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                                 80,
                                                 20,
                                               );
-                                              if (r.intersect(tRect) == tRect) {
+                                              if (r.overlaps(tRect)) {
                                                 _dragChildren.add(sibling);
                                               }
                                             }
@@ -938,143 +872,21 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                     Offset delta =
                                         details.localPosition -
                                         _dragStartOffset!;
-
-                                    if (_activeResizeHandle !=
-                                            ResizeHandle.none &&
-                                        _initialFrameRect != null &&
-                                        _selectedFrame!.secondaryPoint !=
-                                            null) {
-                                      double left = _selectedFrame!.point.dx;
-                                      double top = _selectedFrame!.point.dy;
-                                      double right =
-                                          _selectedFrame!.secondaryPoint!.dx;
-                                      double bottom =
-                                          _selectedFrame!.secondaryPoint!.dy;
-
-                                      if (_activeResizeHandle ==
-                                              ResizeHandle.topLeft ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.centerLeft ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.bottomLeft) {
-                                        left += delta.dx;
-                                      }
-                                      if (_activeResizeHandle ==
-                                              ResizeHandle.topRight ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.centerRight ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.bottomRight) {
-                                        right += delta.dx;
-                                      }
-                                      if (_activeResizeHandle ==
-                                              ResizeHandle.topLeft ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.topCenter ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.topRight) {
-                                        top += delta.dy;
-                                      }
-                                      if (_activeResizeHandle ==
-                                              ResizeHandle.bottomLeft ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.bottomCenter ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.bottomRight) {
-                                        bottom += delta.dy;
-                                      }
-
-                                      if (right - left < 40) {
-                                        if (left != _selectedFrame!.point.dx)
-                                          left = right - 40;
-                                        else
-                                          right = left + 40;
-                                      }
-                                      if (bottom - top < 40) {
-                                        if (top != _selectedFrame!.point.dy)
-                                          top = bottom - 40;
-                                        else
-                                          bottom = top + 40;
-                                      }
-
-                                      _selectedFrame!.point = Offset(left, top);
-                                      _selectedFrame!.secondaryPoint = Offset(
-                                        right,
-                                        bottom,
-                                      );
-
-                                      if (_selectedFrame!.type ==
-                                              ShapeType.frame &&
-                                          _initialFrameRect!.width > 0 &&
-                                          _initialFrameRect!.height > 0) {
-                                        double scaleX =
-                                            (right - left) /
-                                            _initialFrameRect!.width;
-                                        double scaleY =
-                                            (bottom - top) /
-                                            _initialFrameRect!.height;
-                                        for (var child in _dragChildren) {
-                                          if (_initialChildRects.containsKey(
-                                            child,
-                                          )) {
-                                            Rect initRect =
-                                                _initialChildRects[child]!;
-                                            double childLeft =
-                                                left +
-                                                (initRect.left -
-                                                        _initialFrameRect!
-                                                            .left) *
-                                                    scaleX;
-                                            double childTop =
-                                                top +
-                                                (initRect.top -
-                                                        _initialFrameRect!
-                                                            .top) *
-                                                    scaleY;
-                                            double childRight =
-                                                left +
-                                                (initRect.right -
-                                                        _initialFrameRect!
-                                                            .left) *
-                                                    scaleX;
-                                            double childBottom =
-                                                top +
-                                                (initRect.bottom -
-                                                        _initialFrameRect!
-                                                            .top) *
-                                                    scaleY;
-
-                                            child.point = Offset(
-                                              childLeft,
-                                              childTop,
-                                            );
-                                            if (child.secondaryPoint != null) {
-                                              child.secondaryPoint = Offset(
-                                                childRight,
-                                                childBottom,
-                                              );
-                                            }
-                                          }
-                                        }
-                                      }
-                                      _dragStartOffset = details.localPosition;
-                                    } else {
-                                      _selectedFrame!.point += delta;
-                                      if (_selectedFrame!.secondaryPoint !=
-                                          null) {
-                                        _selectedFrame!.secondaryPoint =
-                                            _selectedFrame!.secondaryPoint! +
-                                            delta;
-                                      }
-                                      for (var child in _dragChildren) {
-                                        child.point += delta;
-                                        if (child.secondaryPoint != null) {
-                                          child.secondaryPoint =
-                                              child.secondaryPoint! + delta;
-                                        }
-                                      }
-                                      _dragStartOffset = details.localPosition;
+                                    _selectedFrame!.point += delta;
+                                    if (_selectedFrame!.secondaryPoint !=
+                                        null) {
+                                      _selectedFrame!.secondaryPoint =
+                                          _selectedFrame!.secondaryPoint! +
+                                          delta;
                                     }
+                                    for (var child in _dragChildren) {
+                                      child.point += delta;
+                                      if (child.secondaryPoint != null) {
+                                        child.secondaryPoint =
+                                            child.secondaryPoint! + delta;
+                                      }
+                                    }
+                                    _dragStartOffset = details.localPosition;
                                   });
                                   return;
                                 } else if (currentMode == DrawingMode.select) {
@@ -1112,6 +924,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                     currentMode == DrawingMode.button)
                                   return;
                                 if (currentMode == DrawingMode.select) {
+                                  _selectedFrame = null;
                                   _dragStartOffset = null;
                                   return;
                                 }
@@ -1127,18 +940,13 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                 });
                               },
                               child: CustomPaint(
-                                painter: DrawingPainter(
-                                  pointsList: points,
-                                  selectedPoint: _selectedFrame,
-                                  isDesktopMode: isDesktopMode,
-                                ),
+                                painter: DrawingPainter(pointsList: points),
                                 size: const Size(3000, 3000),
                               ),
-                            ), // closes GestureDetector
-                          ), // closes MouseRegion
-                        ), // closes Container
-                      ), // closes RepaintBoundary
-                    ), // closes InteractiveViewer
+                            ),
+                          ),
+                        ),
+                      ),
 
                       // Floating Input field for editable text
                       if (_editingElement != null &&
@@ -1231,81 +1039,41 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                           ),
                         ),
 
-                      // Top Right Action Tab (Undo & Clear)
+                      // Clear Canvas Button (top right of left area)
                       Positioned(
                         top: 20,
                         right: 20,
-                        child: Container(
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
-                              width: 1.0,
+                        child: Tooltip(
+                          message: 'Clear Canvas',
+                          child: Material(
+                            elevation: 4,
+                            shape: const CircleBorder(),
+                            color: Colors.white,
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: () {
+                                setState(() {
+                                  points.clear();
+                                  hasGenerated = false;
+                                  generatedHtml = "";
+                                  isClarifying = false;
+                                  _promptController.clear();
+                                  currentMode = DrawingMode.pen;
+                                  uploadedImages.clear();
+                                  _imageCounter = 0;
+                                  _editingElement = null;
+                                  ambiguities.clear();
+                                  currentAmbiguityIndex = 0;
+                                });
+                              },
+                              child: const Padding(
+                                padding: EdgeInsets.all(12),
+                                child: Icon(
+                                  Icons.clear,
+                                  color: Colors.redAccent,
+                                ),
+                              ),
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
-                                blurRadius: 12,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Tooltip(
-                                message: 'Undo',
-                                child: InkWell(
-                                  onTap: () {
-                                    setState(() {
-                                      if (points.isNotEmpty) {
-                                        points.removeLast();
-                                      }
-                                    });
-                                  },
-                                  child: Icon(
-                                    Icons.undo,
-                                    color: isDarkMode ? Colors.white70 : Colors.black87,
-                                    size: 20,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Container(
-                                width: 1,
-                                height: 20,
-                                color: isDarkMode ? Colors.white24 : Colors.grey.shade300,
-                              ),
-                              const SizedBox(width: 12),
-                              Tooltip(
-                                message: 'Clear Canvas',
-                                child: InkWell(
-                                  onTap: () {
-                                    setState(() {
-                                      points.clear();
-                                      hasGenerated = false;
-                                      generatedHtml = "";
-                                      isClarifying = false;
-                                      _promptController.clear();
-                                      currentMode = DrawingMode.pen;
-                                      uploadedImages.clear();
-                                      _imageCounter = 0;
-                                      _editingElement = null;
-                                      ambiguities.clear();
-                                      currentAmbiguityIndex = 0;
-                                    });
-                                  },
-                                  child: const Icon(
-                                    Icons.delete_outline,
-                                    color: Colors.redAccent,
-                                    size: 20,
-                                  ),
-                                ),
-                              ),
-                            ],
                           ),
                         ),
                       ),
@@ -1321,199 +1089,187 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                         Container(
                           height: 48,
                           decoration: BoxDecoration(
-                            color: isDarkMode
-                                ? const Color(0xFF2A2A2A)
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isDarkMode
-                                  ? Colors.white24
-                                  : Colors.grey.shade400,
-                              width: 1.0,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
-                                blurRadius: 12,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
+                        color: isDarkMode
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDarkMode
+                              ? Colors.white24
+                              : Colors.grey.shade400,
+                          width: 1.0,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
                           ),
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                onEnter: (_) =>
-                                    setState(() => _isAddHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isAddHovered = false),
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      final int newFrameIndex =
-                                          points
-                                              .where(
-                                                (p) =>
-                                                    p.type == ShapeType.frame,
-                                              )
-                                              .length +
-                                          1;
-                                      points.add(
-                                        DrawingPoint(
-                                          point: const Offset(40, 40),
-                                          secondaryPoint: const Offset(
-                                            360,
-                                            690,
-                                          ),
-                                          type: ShapeType.frame,
-                                          text: "screen_$newFrameIndex",
-                                          paint: Paint()
-                                            ..color = Colors.blueAccent
-                                            ..strokeWidth = 6.0
-                                            ..style = PaintingStyle.stroke,
-                                        ),
-                                      );
-                                    });
-                                  },
-                                  child: Icon(
-                                    Icons.add,
-                                    color: isDarkMode
-                                        ? Colors.white
-                                        : Colors.black87,
-                                    size: 24,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 24),
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                onEnter: (_) =>
-                                    setState(() => _isSelectHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isSelectHovered = false),
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      currentMode = DrawingMode.select;
-                                    });
-                                  },
-                                  child: Icon(
-                                    Icons.pan_tool_alt_outlined,
-                                    color: currentMode == DrawingMode.select
-                                        ? Colors.blueAccent
-                                        : (isDarkMode
-                                              ? Colors.white
-                                              : Colors.black87),
-                                    size: 22,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 24),
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                onEnter: (_) =>
-                                    setState(() => _isImageHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isImageHovered = false),
-                                child: GestureDetector(
-                                  onTap: _pickImage,
-                                  child: Icon(
-                                    Icons.image_outlined,
-                                    color: isDarkMode
-                                        ? Colors.white
-                                        : Colors.black87,
-                                    size: 22,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 24),
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                onEnter: (_) {
-                                  _popupHideTimer?.cancel();
-                                  setState(() => _isPencilHovered = true);
-                                },
-                                onExit: (_) {
-                                  setState(() => _isPencilHovered = false);
-                                  _popupHideTimer = Timer(
-                                    const Duration(milliseconds: 2000),
-                                    () {
-                                      if (mounted) setState(() {});
-                                    },
+                        ],
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onEnter: (_) =>
+                                setState(() => _isAddHovered = true),
+                            onExit: (_) =>
+                                setState(() => _isAddHovered = false),
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  final int newFrameIndex = points.where((p) => p.type == ShapeType.frame).length + 1;
+                                  points.add(
+                                    DrawingPoint(
+                                      point: const Offset(40, 40),
+                                      secondaryPoint: const Offset(360, 690),
+                                      type: ShapeType.frame,
+                                      text: "screen_$newFrameIndex",
+                                      paint: Paint()
+                                        ..color = Colors.blueAccent
+                                        ..strokeWidth = 6.0
+                                        ..style = PaintingStyle.stroke,
+                                    ),
                                   );
+                                });
+                              },
+                              child: Icon(
+                                Icons.add,
+                                color: isDarkMode
+                                    ? Colors.white
+                                    : Colors.black87,
+                                size: 24,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 24),
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onEnter: (_) =>
+                                setState(() => _isSelectHovered = true),
+                            onExit: (_) =>
+                                setState(() => _isSelectHovered = false),
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  currentMode = DrawingMode.select;
+                                });
+                              },
+                              child: Icon(
+                                Icons.pan_tool_alt_outlined,
+                                color: currentMode == DrawingMode.select
+                                    ? Colors.blueAccent
+                                    : (isDarkMode
+                                          ? Colors.white
+                                          : Colors.black87),
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 24),
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onEnter: (_) =>
+                                setState(() => _isImageHovered = true),
+                            onExit: (_) =>
+                                setState(() => _isImageHovered = false),
+                            child: GestureDetector(
+                              onTap: _pickImage,
+                              child: Icon(
+                                Icons.image_outlined,
+                                color: isDarkMode
+                                    ? Colors.white
+                                    : Colors.black87,
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 24),
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onEnter: (_) {
+                              _popupHideTimer?.cancel();
+                              setState(() => _isPencilHovered = true);
+                            },
+                            onExit: (_) {
+                              setState(() => _isPencilHovered = false);
+                              _popupHideTimer = Timer(
+                                const Duration(milliseconds: 2000),
+                                () {
+                                  if (mounted) setState(() {});
                                 },
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      if (currentMode != DrawingMode.pen) {
-                                        currentMode = DrawingMode.pen;
-                                      }
-                                    });
-                                  },
-                                  child: Icon(
-                                    Icons.draw_outlined,
-                                    color: currentMode == DrawingMode.pen
-                                        ? Colors.blueAccent
-                                        : (isDarkMode
-                                              ? Colors.white
-                                              : Colors.black87),
-                                    size: 22,
+                              );
+                            },
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  if (currentMode != DrawingMode.pen) {
+                                    currentMode = DrawingMode.pen;
+                                  }
+                                });
+                              },
+                              child: Icon(
+                                Icons.draw_outlined,
+                                color: currentMode == DrawingMode.pen
+                                    ? Colors.blueAccent
+                                    : (isDarkMode
+                                          ? Colors.white
+                                          : Colors.black87),
+                                size: 22,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 24),
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            onEnter: (_) =>
+                                setState(() => _isGenerateHovered = true),
+                            onExit: (_) =>
+                                setState(() => _isGenerateHovered = false),
+                            child: GestureDetector(
+                              onTap: isGenerating ? null : _generatePreview,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isDarkMode
+                                        ? Colors.white
+                                        : Colors.black87,
+                                    width: 1.2,
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 24),
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                onEnter: (_) =>
-                                    setState(() => _isGenerateHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isGenerateHovered = false),
-                                child: GestureDetector(
-                                  onTap: isGenerating ? null : _generatePreview,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(4),
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
+                                child: isGenerating
+                                    ? SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: isDarkMode
+                                              ? Colors.white
+                                              : Colors.black87,
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.arrow_outward,
                                         color: isDarkMode
                                             ? Colors.white
                                             : Colors.black87,
-                                        width: 1.2,
+                                        size: 16,
                                       ),
-                                    ),
-                                    child: isGenerating
-                                        ? SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: isDarkMode
-                                                  ? Colors.white
-                                                  : Colors.black87,
-                                            ),
-                                          )
-                                        : Icon(
-                                            Icons.arrow_outward,
-                                            color: isDarkMode
-                                                ? Colors.white
-                                                : Colors.black87,
-                                            size: 16,
-                                          ),
-                                  ),
-                                ),
                               ),
-                            ],
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 16),
-                        _buildPromptField(),
-                        const SizedBox(width: 16),
-                        _buildDeviceToggle(),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 16),
+                    _buildStyleTab(),
+                  ],
+                ),
+              ),
                   if (_showDrawTools)
                     Positioned(
                       bottom: 78,
@@ -1535,117 +1291,111 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                           padding: const EdgeInsets.only(bottom: 12.0),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
-                            decoration: BoxDecoration(
+                            horizontal: 24,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isDarkMode
+                                ? const Color(0xFF2A2A2A)
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
                               color: isDarkMode
-                                  ? const Color(0xFF2A2A2A)
-                                  : Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: isDarkMode
-                                    ? Colors.white24
-                                    : Colors.grey.shade400,
-                                width: 1.0,
+                                  ? Colors.white24
+                                  : Colors.grey.shade400,
+                              width: 1.0,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.08),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.08),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                MouseRegion(
-                                  cursor: SystemMouseCursors.click,
-                                  hitTestBehavior: HitTestBehavior.opaque,
-                                  onEnter: (_) =>
-                                      setState(() => _isRectHovered = true),
-                                  onExit: (_) =>
-                                      setState(() => _isRectHovered = false),
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        currentMode = DrawingMode.rectangle;
-                                        _isPopupHovered = false;
-                                      });
-                                    },
-                                    child: Icon(
-                                      Icons.crop_square,
-                                      size: 22,
-                                      color:
-                                          currentMode == DrawingMode.rectangle
-                                          ? Colors.blue
-                                          : _isRectHovered
-                                          ? Colors.blueAccent
-                                          : (isDarkMode
-                                                ? Colors.white
-                                                : Colors.black87),
-                                    ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              MouseRegion(
+                                cursor: SystemMouseCursors.click,
+                                hitTestBehavior: HitTestBehavior.opaque,
+                                onEnter: (_) =>
+                                    setState(() => _isRectHovered = true),
+                                onExit: (_) =>
+                                    setState(() => _isRectHovered = false),
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      currentMode = DrawingMode.rectangle;
+                                      _isPopupHovered = false;
+                                    });
+                                  },
+                                  child: Icon(
+                                    Icons.crop_square,
+                                    size: 22,
+                                    color:
+                                        currentMode == DrawingMode.rectangle
+                                        ? Colors.blue
+                                        : _isRectHovered
+                                        ? Colors.blueAccent
+                                        : (isDarkMode ? Colors.white : Colors.black87),
                                   ),
                                 ),
-                                const SizedBox(width: 24),
-                                MouseRegion(
-                                  cursor: SystemMouseCursors.click,
-                                  hitTestBehavior: HitTestBehavior.opaque,
-                                  onEnter: (_) =>
-                                      setState(() => _isButtonHovered = true),
-                                  onExit: (_) =>
-                                      setState(() => _isButtonHovered = false),
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        currentMode = DrawingMode.button;
-                                        _isPopupHovered = false;
-                                      });
-                                    },
-                                    child: Icon(
-                                      Icons.smart_button,
-                                      size: 22,
-                                      color: currentMode == DrawingMode.button
-                                          ? Colors.blue
-                                          : _isButtonHovered
-                                          ? Colors.blueAccent
-                                          : (isDarkMode
-                                                ? Colors.white
-                                                : Colors.black87),
-                                    ),
+                              ),
+                              const SizedBox(width: 24),
+                              MouseRegion(
+                                cursor: SystemMouseCursors.click,
+                                hitTestBehavior: HitTestBehavior.opaque,
+                                onEnter: (_) =>
+                                    setState(() => _isButtonHovered = true),
+                                onExit: (_) =>
+                                    setState(() => _isButtonHovered = false),
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      currentMode = DrawingMode.button;
+                                      _isPopupHovered = false;
+                                    });
+                                  },
+                                  child: Icon(
+                                    Icons.smart_button,
+                                    size: 22,
+                                    color: currentMode == DrawingMode.button
+                                        ? Colors.blue
+                                        : _isButtonHovered
+                                        ? Colors.blueAccent
+                                        : (isDarkMode ? Colors.white : Colors.black87),
                                   ),
                                 ),
-                                const SizedBox(width: 24),
-                                MouseRegion(
-                                  cursor: SystemMouseCursors.click,
-                                  hitTestBehavior: HitTestBehavior.opaque,
-                                  onEnter: (_) {},
-                                  onExit: (_) {},
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        currentMode = DrawingMode.text;
-                                        _isPopupHovered = false;
-                                      });
-                                    },
-                                    child: Icon(
-                                      Icons.text_fields,
-                                      size: 22,
-                                      color: currentMode == DrawingMode.text
-                                          ? Colors.blue
-                                          : (isDarkMode
-                                                ? Colors.white
-                                                : Colors.black87),
-                                    ),
+                              ),
+                              const SizedBox(width: 24),
+                              MouseRegion(
+                                cursor: SystemMouseCursors.click,
+                                hitTestBehavior: HitTestBehavior.opaque,
+                                onEnter: (_) {},
+                                onExit: (_) {},
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      currentMode = DrawingMode.text;
+                                      _isPopupHovered = false;
+                                    });
+                                  },
+                                  child: Icon(
+                                    Icons.text_fields,
+                                    size: 22,
+                                    color: currentMode == DrawingMode.text
+                                        ? Colors.blue
+                                        : (isDarkMode ? Colors.white : Colors.black87),
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
                     ),
+                  ),
                   if (isClarifying)
                     Positioned(
                       right: 150,
@@ -1676,7 +1426,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
             child: GestureDetector(
               onPanUpdate: (details) {
                 setState(() {
-                  double totalWidth = MediaQuery.of(context).size.width - 64;
+                  double totalWidth = MediaQuery.of(context).size.width - 64; 
                   if (totalWidth > 0) {
                     _leftPanelFraction += details.delta.dx / totalWidth;
                     _leftPanelFraction = _leftPanelFraction.clamp(0.2, 0.8);
@@ -1701,48 +1451,67 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                     ), // Light gray in light mode, dark otherwise
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final targetDeviceWidth = isDesktopMode ? 900.0 : 320.0;
-                  final targetDeviceHeight = isDesktopMode ? 600.0 : 650.0;
-                  const extraHeight = 68.0;
-
-                  double scale = 1.0;
-                  if (targetDeviceWidth > constraints.maxWidth - 40) {
-                    scale = (constraints.maxWidth - 40) / targetDeviceWidth;
-                  }
-                  if ((targetDeviceHeight * scale) + extraHeight > constraints.maxHeight - 40) {
-                    scale = (constraints.maxHeight - 40 - extraHeight) / targetDeviceHeight;
-                  }
-                  if (scale > 1.0) scale = 1.0;
-                  if (scale < 0.2) scale = 0.2;
-
-                  final deviceWidth = targetDeviceWidth * scale;
-                  final deviceHeight = targetDeviceHeight * scale;
-                  final groupHeight = deviceHeight + extraHeight;
-
-                  final deviceTop = (constraints.maxHeight - groupHeight) / 2;
+                  final phoneWidth = 320.0;
+                  final phoneHeight = 650.0;
+                  final phoneLeft = (constraints.maxWidth - phoneWidth) / 2;
+                  final phoneTop = (constraints.maxHeight - phoneHeight) / 2;
 
                   return Stack(
                     fit: StackFit.expand,
                     clipBehavior: Clip.none,
                     children: [
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        top: deviceTop,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _buildDeviceMockup(deviceWidth, deviceHeight),
-                            const SizedBox(height: 20),
-                            SizedBox(
-                              width: (deviceWidth < 450.0 ? 450.0 : deviceWidth)
-                                      .clamp(10.0, constraints.maxWidth - 40.0)
-                                      .clamp(10.0, 600.0),
-                              child: _buildGlobalPrunePrompt(),
-                            ),
-                          ],
-                        ),
+                      Center(
+                        child: _buildPhoneMockup(),
                       ),
+                      if (_showPrunePopup)
+                        Positioned.fill(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
+                              setState(() {
+                                _showPrunePopup = false;
+                              });
+                              setIframeInteractable(true);
+                            },
+                            child: Container(color: Colors.transparent),
+                          ),
+                        ),
+                      if (_showColorPicker)
+                        Positioned(
+                          left: phoneLeft - 260 + _colorPickerPosition.dx,
+                          top: (phoneTop + _colorPickerPosition.dy - 100).clamp(10.0, constraints.maxHeight - 350.0),
+                          child: Material(
+                            type: MaterialType.transparency,
+                            child: LiveColorPicker(
+                              initialColor: _currentColor,
+                              onDrag: (details) {
+                                setState(() {
+                                  _colorPickerPosition += details.delta;
+                                });
+                              },
+                              onColorChanged: (newColor) {
+                                setState(() {
+                                  _currentColor = newColor;
+                                });
+                                updatePreviewColor(
+                                  'rgba(${newColor.red}, ${newColor.green}, ${newColor.blue}, ${(newColor.alpha / 255.0).toStringAsFixed(2)})',
+                                );
+                              },
+                              onClose: () {
+                                setState(() => _showColorPicker = false);
+                              },
+                            ),
+                          ),
+                        ),
+                      if (_showPrunePopup)
+                        Positioned(
+                          left: phoneLeft + _prunePosition.dx - 125,
+                          top: phoneTop + _prunePosition.dy,
+                          child: Material(
+                            type: MaterialType.transparency,
+                            child: _buildPrunePopup(),
+                          ),
+                        ),
                     ],
                   );
                 },
@@ -1750,225 +1519,94 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
             ),
           ),
         ],
-          ),
-          if (_showPrunePopup)
-            Positioned.fill(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {
-                  setState(() => _showPrunePopup = false);
-                  setIframeInteractable(true);
-                },
-                child: Container(color: Colors.transparent),
-              ),
-            ),
-          if (_showPrunePopup)
-            Positioned(
-              left: _prunePosition.dx.clamp(10.0, (MediaQuery.of(context).size.width - 260.0).clamp(10.0, double.infinity)),
-              top: _prunePosition.dy.clamp(10.0, (MediaQuery.of(context).size.height - 250.0).clamp(10.0, double.infinity)),
-              child: Material(
-                type: MaterialType.transparency,
-                child: _buildPrunePopup(),
-              ),
-            ),
-          if (_showColorPicker)
-            Positioned(
-              left: _colorPickerPosition.dx.clamp(10.0, (MediaQuery.of(context).size.width - 260.0).clamp(10.0, double.infinity)),
-              top: _colorPickerPosition.dy.clamp(10.0, (MediaQuery.of(context).size.height - 350.0).clamp(10.0, double.infinity)),
-              child: Material(
-                type: MaterialType.transparency,
-                child: LiveColorPicker(
-                  initialColor: _currentColor,
-                  onDrag: (details) {
-                    setState(() => _colorPickerPosition += details.delta);
-                  },
-                  onColorChanged: (newColor) {
-                    setState(() => _currentColor = newColor);
-                    updatePreviewColor(
-                      'rgba(${(newColor.r * 255.0).round()}, ${(newColor.g * 255.0).round()}, ${(newColor.b * 255.0).round()}, ${newColor.a.toStringAsFixed(2)})',
-                    );
-                  },
-                  onClose: () {
-                    setState(() => _showColorPicker = false);
-                    setIframeInteractable(true);
-                  },
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }
 
-  Widget _buildPromptField() {
+  Widget _buildStyleTab() {
     return Container(
-      width: 320,
-      height: 48,
-      decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
-          width: 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+        height: 48,
+        decoration: BoxDecoration(
+          color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
+            width: 1.0,
           ),
-        ],
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Center(
-        child: TextField(
-          controller: _promptController,
-          decoration: InputDecoration(
-            hintText: "What are we building? (e.g. A messaging app)",
-            border: InputBorder.none,
-            isDense: true,
-            hintStyle: TextStyle(
-              color: isDarkMode ? Colors.white54 : Colors.black54,
-              fontSize: 14,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
-          ),
-          style: TextStyle(
-            color: isDarkMode ? Colors.white : Colors.black87,
-            fontSize: 14,
-          ),
+          ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildGlobalPrunePrompt() {
-    return Container(
-      height: 48,
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
-          width: 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          const Icon(Icons.auto_awesome, color: Colors.blueAccent, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: TextField(
-              controller: _globalPruneController,
-              decoration: InputDecoration(
-                hintText: "Make overall changes... (e.g. Use a darker theme)",
-                border: InputBorder.none,
-                isDense: true,
-                hintStyle: TextStyle(
-                  color: isDarkMode ? Colors.white54 : Colors.black54,
-                  fontSize: 14,
-                ),
-              ),
-              style: TextStyle(
-                color: isDarkMode ? Colors.white : Colors.black87,
-                fontSize: 14,
-              ),
-              onSubmitted: (_) => _sendGlobalPruneRequest(),
-            ),
-          ),
-          MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              onTap: _sendGlobalPruneRequest,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              onEnter: (_) {
+                _stylePopupHideTimer?.cancel();
+                setState(() => _isStyleHovered = true);
+              },
+              onExit: (_) {
+                setState(() => _isStyleHovered = false);
+                _stylePopupHideTimer = Timer(const Duration(milliseconds: 2000), () {
+                  if (mounted) setState(() {});
+                });
+              },
               child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: const BoxDecoration(
-                  color: Colors.blue,
-                  shape: BoxShape.circle,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isDarkMode ? Colors.white12 : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                child: const Icon(Icons.send, color: Colors.white, size: 16),
+                child: Text(
+                  currentStyle.isNotEmpty ? currentStyle[0].toUpperCase() + currentStyle.substring(1) : currentStyle,
+                  style: TextStyle(
+                    color: isDarkMode ? Colors.white : Colors.black87,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
               ),
             ),
-          ),
-        ],
-      ),
+            const SizedBox(width: 12),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              onEnter: (_) => setState(() => _isPlusHovered = true),
+              onExit: (_) => setState(() => _isPlusHovered = false),
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _isAddingStyle = !_isAddingStyle;
+                  });
+                },
+                child: Icon(
+                  Icons.add,
+                  color: _isPlusHovered ? Colors.blue : (isDarkMode ? Colors.white : Colors.black87),
+                  size: 20,
+                ),
+              ),
+            ),
+          ],
+        ),
     );
   }
 
-  Future<void> _sendGlobalPruneRequest() async {
-    if (_globalPruneController.text.trim().isEmpty) return;
-    final instruction = _globalPruneController.text.trim();
-    setState(() {
-      isGenerating = true;
-      hasGenerated = false;
-    });
-    setIframeInteractable(true);
+  
 
-    final promptText = StringBuffer();
-    promptText.writeln("You are an expert AI web designer.");
-    promptText.writeln(
-      "The user wants to make global/overall changes to the following entire HTML design.",
-    );
-    promptText.writeln("User Instruction: \"$instruction\".");
-    promptText.writeln(
-      "Apply these overall changes perfectly across the document. CRITICAL: Output ONLY the full updated HTML structure, wrapped in a markdown ```html block. Do not use JSON or output any other text.",
-    );
-    promptText.writeln(
-      "Here is the FULL HTML:\n\n```html\n$generatedHtml\n```",
-    );
 
-    try {
-      final response = await http.post(
-        Uri.parse(backendApiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'prompt': promptText.toString()}),
-      );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        String text = data['text'] ?? '';
+// ============================================================================
+// ============================================================================
+// SECTION: UI COMPONENT: AI CLARIFICATION INTERACTIVE POP-UP
+// ============================================================================
+// ============================================================================
 
-        final htmlBlockRegex = RegExp(r'```(?:html|xml)\s*([\s\S]*?)```', caseSensitive: false);
-        final genericBlockRegex = RegExp(r'```[a-zA-Z]*\s*([\s\S]*?)```');
-        final htmlMatch = htmlBlockRegex.firstMatch(text);
-        if (htmlMatch != null) {
-          text = (htmlMatch.group(1) ?? text).trim();
-        } else {
-          final genericMatch = genericBlockRegex.firstMatch(text);
-          if (genericMatch != null) {
-            text = (genericMatch.group(1) ?? text).trim();
-          }
-        }
-
-        if (mounted) {
-          setState(() {
-            generatedHtml = text;
-            hasGenerated = true;
-            isGenerating = false;
-            _globalPruneController.clear();
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint("Error applying global changes: $e");
-      if (mounted) {
-        setState(() {
-          hasGenerated = true; // revert to false was a bad state
-          isGenerating = false;
-        });
-      }
-    }
-  }
-
-  Widget _buildAIPopup() {
+Widget _buildAIPopup() {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOutCubic,
@@ -2102,16 +1740,14 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                           // save answer? We're ignoring answers temporarily or accumulating them
                           final answer = val.trim();
                           if (answer.isNotEmpty) {
-                            _promptController.text +=
-                                "\nQ: ${clarifyQuestion} -> A: $answer";
+                            _promptController.text += "\nQ: ${clarifyQuestion} -> A: $answer";
                           }
                           currentAmbiguityIndex++;
                           _aiReplyController.clear();
                         } else {
                           final answer = val.trim();
                           if (answer.isNotEmpty) {
-                            _promptController.text +=
-                                "\nQ: ${clarifyQuestion} -> A: $answer";
+                            _promptController.text += "\nQ: ${clarifyQuestion} -> A: $answer";
                           }
                           isClarifying = false;
                           _generatePreview(userReply: "All questions answered");
@@ -2157,25 +1793,20 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                       child: GestureDetector(
                         onTap: () {
                           setState(() {
-                            if (currentAmbiguityIndex <
-                                ambiguities.length - 1) {
+                            if (currentAmbiguityIndex < ambiguities.length - 1) {
                               final answer = _aiReplyController.text.trim();
                               if (answer.isNotEmpty) {
-                                _promptController.text +=
-                                    "\nQ: ${clarifyQuestion} -> A: $answer";
+                                _promptController.text += "\nQ: ${clarifyQuestion} -> A: $answer";
                               }
                               currentAmbiguityIndex++;
                               _aiReplyController.clear();
                             } else {
                               final answer = _aiReplyController.text.trim();
                               if (answer.isNotEmpty) {
-                                _promptController.text +=
-                                    "\nQ: ${clarifyQuestion} -> A: $answer";
+                                _promptController.text += "\nQ: ${clarifyQuestion} -> A: $answer";
                               }
                               isClarifying = false;
-                              _generatePreview(
-                                userReply: "All questions answered",
-                              );
+                              _generatePreview(userReply: "All questions answered");
                               _aiReplyController.clear();
                             }
                           });
@@ -2233,7 +1864,17 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     );
   }
 
-  Widget _buildPrunePopup() {
+  
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: UI COMPONENT: ELEMENT PRUNING/EDITING MODAL
+// ============================================================================
+// ============================================================================
+
+Widget _buildPrunePopup() {
     return Container(
       width: 250,
       padding: const EdgeInsets.all(16),
@@ -2242,11 +1883,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.blue.shade300, width: 1.5),
         boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
+          BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -2258,11 +1895,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
             children: [
               const Text(
                 "Describe the change to make",
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                  color: Colors.black87,
-                ),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.black87),
               ),
               InkWell(
                 onTap: () {
@@ -2292,8 +1925,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                     border: InputBorder.none,
                     isDense: true,
                     contentPadding: EdgeInsets.zero,
-                    hintText:
-                        "Make it shorter , black outline, transparent , black text curved edges",
+                    hintText: "Make it shorter , black outline, transparent , black text curved edges",
                     hintStyle: TextStyle(color: Colors.black38),
                   ),
                 ),
@@ -2307,11 +1939,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                         color: Colors.white,
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
-                        Icons.arrow_circle_right_outlined,
-                        size: 24,
-                        color: Colors.black,
-                      ),
+                      child: const Icon(Icons.arrow_circle_right_outlined, size: 24, color: Colors.black),
                     ),
                   ),
                 ),
@@ -2328,26 +1956,18 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     final instruction = _pruneController.text.trim();
     setState(() {
       _showPrunePopup = false;
-      isGenerating = true;
-      hasGenerated = false;
+      isGenerating = true; 
+      hasGenerated = false; 
     });
     setIframeInteractable(true);
 
     final promptText = StringBuffer();
     promptText.writeln("You are an expert AI layout editor.");
-    promptText.writeln(
-      "Look at the requested changes. The user has Double-Clicked a specific HTML element in the preview UI, marked with `data-ai-target=\"true\"`.",
-    );
+    promptText.writeln("Look at the requested changes. The user has Double-Clicked a specific HTML element in the preview UI, marked with `data-ai-target=\"true\"`.");
     promptText.writeln("User Instruction: \"$instruction\".");
-    promptText.writeln(
-      "Modify ONLY that specific targeted element to achieve the required design changes.",
-    );
-    promptText.writeln(
-      "CRITICAL: Output ONLY the full updated HTML structure matching the user's styling request, wrapped in a markdown ```html block. Do not use JSON or output any other text.",
-    );
-    promptText.writeln(
-      "Here is the FULL HTML. Find the element with data-ai-target='true' and modify it:\n\n```html\n$_pruneComponentHtml\n```",
-    );
+    promptText.writeln("Modify ONLY that specific targeted element to achieve the required design changes.");
+    promptText.writeln("CRITICAL: Output ONLY the full updated HTML structure matching the user's styling request, wrapped in a markdown ```html block. Do not use JSON or output any other text.");
+    promptText.writeln("Here is the FULL HTML. Find the element with data-ai-target='true' and modify it:\n\n```html\n$_pruneComponentHtml\n```");
 
     try {
       final response = await http.post(
@@ -2355,7 +1975,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'promptText': promptText.toString(),
-          'base64Image': "",
+          'base64Image': "", 
           'isInitialGeneration': false,
         }),
       );
@@ -2363,141 +1983,43 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       if (response.statusCode == 200) {
         final jsonResponse = jsonDecode(response.body);
         String text = jsonResponse['text'] ?? "";
-
-        final htmlBlockRegex = RegExp(r'```(?:html|xml)\s*([\s\S]*?)```', caseSensitive: false);
-        final genericBlockRegex = RegExp(r'```[a-zA-Z]*\s*([\s\S]*?)```');
-        final htmlMatch = htmlBlockRegex.firstMatch(text);
-        if (htmlMatch != null) {
-          text = (htmlMatch.group(1) ?? text).trim();
+        
+        final htmlRegex = RegExp(r'```html\s*(.*?)\s*```', dotAll: true);
+        final match = htmlRegex.firstMatch(text);
+        if (match != null) {
+          text = match.group(1)!;
         } else {
-          final genericMatch = genericBlockRegex.firstMatch(text);
-          if (genericMatch != null) {
-            text = (genericMatch.group(1) ?? text).trim();
-          }
+          text = text.replaceAll('```', '').trim();
         }
 
         if (mounted) {
           setState(() {
-            generatedHtml = text;
-            hasGenerated = true;
-            isGenerating = false;
-            _pruneController.clear();
+             generatedHtml = text;
+             hasGenerated = true;
+             isGenerating = false;
+             _pruneController.clear();
           });
         }
       }
-    } catch (e) {
+    } catch(e) {
       debugPrint("Error updating component: $e");
     }
   }
 
-  Widget _buildDeviceToggle() {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            isDesktopMode = !isDesktopMode;
-          });
-        },
-        child: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
-              width: 1.0,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Center(
-            child: Icon(
-              isDesktopMode ? Icons.desktop_mac : Icons.phone_iphone,
-              color: isDarkMode ? Colors.white : Colors.black87,
-              size: 20,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  
 
-  Widget _buildDeviceMockup(double width, double height) {
-    if (!isDesktopMode) return _buildPhoneMockup(width, height);
 
+
+// ============================================================================
+// ============================================================================
+// SECTION: UI COMPONENT: DEVICE PREVIEW FRAME
+// ============================================================================
+// ============================================================================
+
+Widget _buildPhoneMockup() {
     return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade400, width: 2),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 20,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // Browser Header
-          Container(
-            height: 30,
-            decoration: BoxDecoration(
-              color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade200,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(10),
-              ),
-              border: Border(
-                bottom: BorderSide(color: Colors.grey.shade400, width: 1),
-              ),
-            ),
-            child: Row(
-              children: [
-                const SizedBox(width: 10),
-                CircleAvatar(radius: 5, backgroundColor: Colors.red.shade400),
-                const SizedBox(width: 6),
-                CircleAvatar(
-                  radius: 5,
-                  backgroundColor: Colors.orange.shade400,
-                ),
-                const SizedBox(width: 6),
-                CircleAvatar(radius: 5, backgroundColor: Colors.green.shade400),
-              ],
-            ),
-          ),
-          // Browser Body
-          Expanded(
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(10),
-              ),
-              child: Scaffold(
-                backgroundColor: Colors.white,
-                body: hasGenerated
-                    ? _buildGeneratedContent()
-                    : _buildEmptyScreen(),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPhoneMockup(double width, double height) {
-    return Container(
-      width: width,
-      height: height,
+      width: 320,
+      height: 650,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(40),
@@ -2670,27 +2192,14 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         onColorRequest: (colorStr, x, y) {
           setState(() {
             _currentColor = _parseCssColor(colorStr);
-            if (_iframeContainerKey.currentContext != null) {
-              final box = _iframeContainerKey.currentContext!.findRenderObject() as RenderBox;
-              final globalPos = box.localToGlobal(Offset(x, y));
-              _colorPickerPosition = Offset(globalPos.dx + 20, globalPos.dy - 100);
-            } else {
-              _colorPickerPosition = Offset(x, y);
-            }
+            _colorPickerPosition = Offset(0, y);
             _showColorPicker = true;
           });
-          setIframeInteractable(false);
         },
         onDoubleClickComponent: (targetHtml, fullHtml, x, y) {
           setState(() {
             _pruneComponentHtml = fullHtml;
-            if (_iframeContainerKey.currentContext != null) {
-              final box = _iframeContainerKey.currentContext!.findRenderObject() as RenderBox;
-              final globalPos = box.localToGlobal(Offset(x, y));
-              _prunePosition = Offset(globalPos.dx - 125, globalPos.dy);
-            } else {
-              _prunePosition = Offset(x, y);
-            }
+            _prunePosition = Offset(x, y);
             _showPrunePopup = true;
             _showColorPicker = false;
           });
@@ -2700,7 +2209,6 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     }
 
     return Container(
-      key: _iframeContainerKey,
       color: Colors.white,
       width: double.infinity,
       height: double.infinity,
@@ -2708,7 +2216,17 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     );
   }
 
-  Widget _buildSidebar() {
+  
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: UI COMPONENT: LEFT SIDEBAR CONTROLS
+// ============================================================================
+// ============================================================================
+
+Widget _buildSidebar() {
     final bgColor = isDarkMode
         ? const Color.fromARGB(255, 34, 32, 39)
         : const Color(0xFFF5F5F5);
@@ -2816,8 +2334,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                 children: [
                   if (_isSidebarOpen)
                     Tooltip(
-                      message:
-                          "Keyboard Shortcuts:\nR - Draw rectangle\nB - Button\nT - Text",
+                      message: "Keyboard Shortcuts:\nR - Draw rectangle\nB - Button\nT - Text",
                       textStyle: TextStyle(
                         color: isDarkMode ? Colors.white : Colors.black87,
                         fontSize: 14,
@@ -2825,14 +2342,10 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                         height: 1.5,
                       ),
                       decoration: BoxDecoration(
-                        color: isDarkMode
-                            ? const Color(0xFF2A2A2A)
-                            : Colors.white,
+                        color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: isDarkMode
-                              ? Colors.white24
-                              : Colors.grey.shade400,
+                          color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
                           width: 1.0,
                         ),
                         boxShadow: [
@@ -2843,10 +2356,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                           ),
                         ],
                       ),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       child: MouseRegion(
                         cursor: SystemMouseCursors.click,
                         child: Icon(
@@ -2925,14 +2435,8 @@ class DrawingPoint {
 }
 
 class DrawingPainter extends CustomPainter {
-  DrawingPainter({
-    required this.pointsList,
-    this.selectedPoint,
-    this.isDesktopMode = false,
-  });
+  DrawingPainter({required this.pointsList});
   List<DrawingPoint> pointsList;
-  DrawingPoint? selectedPoint;
-  bool isDesktopMode;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -2960,8 +2464,9 @@ class DrawingPainter extends CustomPainter {
         );
         canvas.drawRect(Rect.fromPoints(p.point, p.secondaryPoint!), p.paint);
 
+        // Draw simple frame header
         final textSpan = TextSpan(
-          text: p.text ?? (isDesktopMode ? "Desktop Frame" : "Mobile Frame"),
+          text: p.text ?? "Mobile Frame",
           style: const TextStyle(
             color: Colors.blueAccent,
             fontSize: 14,
@@ -3060,56 +2565,6 @@ class DrawingPainter extends CustomPainter {
         }
       }
     }
-
-    if (selectedPoint != null) {
-      Rect? bounds;
-      if (selectedPoint!.secondaryPoint != null) {
-        bounds = Rect.fromPoints(
-          selectedPoint!.point,
-          selectedPoint!.secondaryPoint!,
-        );
-      } else if (selectedPoint!.type == ShapeType.text) {
-        bounds = Rect.fromLTWH(
-          selectedPoint!.point.dx,
-          selectedPoint!.point.dy,
-          80,
-          20,
-        );
-      }
-
-      if (bounds != null) {
-        final outlinePaint = Paint()
-          ..color = Colors.blueAccent
-          ..strokeWidth = 1.5
-          ..style = PaintingStyle.stroke;
-        canvas.drawRect(bounds, outlinePaint);
-
-        final handlePaint = Paint()
-          ..color = Colors.blue
-          ..style = PaintingStyle.fill;
-        final handleStroke = Paint()
-          ..color = Colors.white
-          ..strokeWidth = 1.0
-          ..style = PaintingStyle.stroke;
-
-        final pts = [
-          bounds.topLeft,
-          bounds.topCenter,
-          bounds.topRight,
-          bounds.centerLeft,
-          bounds.centerRight,
-          bounds.bottomLeft,
-          bounds.bottomCenter,
-          bounds.bottomRight,
-        ];
-
-        for (var pt in pts) {
-          final r = Rect.fromCenter(center: pt, width: 10, height: 10);
-          canvas.drawRect(r, handlePaint);
-          canvas.drawRect(r, handleStroke);
-        }
-      }
-    }
   }
 
   @override
@@ -3171,10 +2626,9 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
         children: [
           // Header
           GestureDetector(
-            behavior: HitTestBehavior.opaque,
             onPanUpdate: widget.onDrag,
             child: Container(
-              color: Colors.transparent,
+              color: Colors.transparent, 
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -3202,7 +2656,6 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
           const Divider(height: 1, thickness: 1),
           // Canvas
           GestureDetector(
-            behavior: HitTestBehavior.opaque,
             onPanUpdate: (details) {
               _handleCanvasDrag(details.localPosition, 250, 200);
             },
@@ -3428,3 +2881,84 @@ class _LiveColorPickerState extends State<LiveColorPicker> {
     _updateColor(_hsvColor.withAlpha(alpha));
   }
 }
+
+```
+
+## Part 2: Generative API Server (Node.js/Express)
+```javascript
+require('dotenv').config();
+
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: BACKEND: SERVER SETUP & DEPENDENCIES
+// ============================================================================
+// ============================================================================
+
+const express = require('express');
+const cors = require('cors');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
+const app = express();
+app.use(cors());
+// Parse large payloads for images
+app.use(express.json({ limit: '50mb' }));
+
+const port = process.env.PORT || 3000;
+
+// Set up Gemini SDK
+// The user should place their GEMINI_API_KEY in the .env file.
+const apiKey = process.env.GEMINI_API_KEY;
+const genAI = new GoogleGenerativeAI(apiKey);
+
+
+
+
+
+// ============================================================================
+// ============================================================================
+// SECTION: BACKEND: GEMINI API GENERATION ENDPOINT
+// ============================================================================
+// ============================================================================
+
+app.post('/api/generate', async (req, res) => {
+  if (!apiKey) {
+    return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the backend." });
+  }
+
+  try {
+    const { promptText, base64Image, isInitialGeneration } = req.body;
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+    // Construct the payload as per original Flutter logic
+    const parts = [
+      { text: promptText }
+    ];
+
+    if (base64Image) {
+      parts.push({
+        inlineData: {
+          data: base64Image,
+          mimeType: 'image/png'
+        }
+      });
+    }
+
+    const result = await model.generateContent(parts);
+    const responseText = result.response.text();
+
+    res.json({ text: responseText });
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Secure backend listening at http://localhost:${port}`);
+});
+
+```

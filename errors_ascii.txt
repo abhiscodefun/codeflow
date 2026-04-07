@@ -1,0 +1,54 @@
+Analyzing vs...
+
+  error - lib\main.dart:1617:27 - Undefined name '_globalPruneController'. Try correcting the name to one that is defined, or defining the name. - undefined_identifier
+  error - lib\main.dart:1654:9 - Undefined name '_globalPruneController'. Try correcting the name to one that is defined, or defining the name. - undefined_identifier
+  error - lib\main.dart:1655:25 - Undefined name '_globalPruneController'. Try correcting the name to one that is defined, or defining the name. - undefined_identifier
+  error - lib\main.dart:1693:14 - Undefined name '_globalPruneController'. Try correcting the name to one that is defined, or defining the name. - undefined_identifier
+warning - lib\main.dart:82:8 - The value of the field '_isAddHovered' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\main.dart:83:8 - The value of the field '_isGenerateHovered' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\main.dart:84:8 - The value of the field '_isSelectHovered' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\main.dart:85:8 - The value of the field '_isImageHovered' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\main.dart:118:8 - The value of the field '_isAddingStyle' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\main.dart:119:8 - The value of the field '_isPlusHovered' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\main.dart:120:31 - The value of the field '_customStyleController' isn't used. Try removing the field, or using it. - unused_field
+warning - lib\main.dart:122:12 - The declaration '_showStylePopup' isn't referenced. Try removing the declaration of '_showStylePopup'. - unused_element
+   info - lib\main.dart:105:22 - The private field _dragChildren could be 'final'. Try making the field 'final'. - prefer_final_fields
+   info - lib\main.dart:106:27 - The private field _initialChildRects could be 'final'. Try making the field 'final'. - prefer_final_fields
+   info - lib\main.dart:115:8 - The private field _isStyleHovered could be 'final'. Try making the field 'final'. - prefer_final_fields
+   info - lib\main.dart:116:8 - The private field _isStyleOptionsHovered could be 'final'. Try making the field 'final'. - prefer_final_fields
+   info - lib\main.dart:118:8 - The private field _isAddingStyle could be 'final'. Try making the field 'final'. - prefer_final_fields
+   info - lib\main.dart:119:8 - The private field _isPlusHovered could be 'final'. Try making the field 'final'. - prefer_final_fields
+   info - lib\main.dart:337:28 - Don't use 'BuildContext's across async gaps. Try rewriting the code to not use the 'BuildContext', or guard the use with a 'mounted' check. - use_build_context_synchronously
+   info - lib\main.dart:481:21 - Empty catch block. Try adding statements to the block, adding a comment to the block, or removing the 'catch' clause. - empty_catches
+   info - lib\main.dart:807:35 - Statements in an if should be enclosed in a block. Try wrapping the statement in a block. - curly_braces_in_flow_control_structures
+   info - lib\main.dart:841:35 - Statements in an if should be enclosed in a block. Try wrapping the statement in a block. - curly_braces_in_flow_control_structures
+   info - lib\main.dart:870:104 - Statements in an if should be enclosed in a block. Try wrapping the statement in a block. - curly_braces_in_flow_control_structures
+   info - lib\main.dart:870:128 - Statements in an if should be enclosed in a block. Try wrapping the statement in a block. - curly_braces_in_flow_control_structures
+   info - lib\main.dart:871:103 - Statements in an if should be enclosed in a block. Try wrapping the statement in a block. - curly_braces_in_flow_control_structures
+   info - lib\main.dart:871:127 - Statements in an if should be enclosed in a block. Try wrapping the statement in a block. - curly_braces_in_flow_control_structures
+   info - lib\main.dart:947:35 - Statements in an if should be enclosed in a block. Try wrapping the statement in a block. - curly_braces_in_flow_control_structures
+   info - lib\main.dart:1004:51 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:1043:51 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:1129:49 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:1337:53 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:1524:52 - 'red' is deprecated and shouldn't be used. Use (*.r * 255.0).round() & 0xff. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:1524:69 - 'green' is deprecated and shouldn't be used. Use (*.g * 255.0).round() & 0xff. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:1524:88 - 'blue' is deprecated and shouldn't be used. Use (*.b * 255.0).round() & 0xff. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:1524:107 - 'alpha' is deprecated and shouldn't be used. Use (*.a * 255.0).round() & 0xff. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:1569:41 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:1843:61 - Unnecessary braces in a string interpolation. Try removing the braces. - unnecessary_brace_in_string_interps
+   info - lib\main.dart:1850:61 - Unnecessary braces in a string interpolation. Try removing the braces. - unnecessary_brace_in_string_interps
+   info - lib\main.dart:1899:65 - Unnecessary braces in a string interpolation. Try removing the braces. - unnecessary_brace_in_string_interps
+   info - lib\main.dart:1906:65 - Unnecessary braces in a string interpolation. Try removing the braces. - unnecessary_brace_in_string_interps
+   info - lib\main.dart:2120:37 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:2405:50 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:2516:49 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:2568:47 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:2627:41 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:2949:28 - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\main.dart:3040:41 - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+   info - lib\preview\backend_diagram.dart:6:9 - Parameter 'key' could be a super parameter. Trying converting 'key' to a super parameter. - use_super_parameters
+   info - lib\preview\dynamic_flutter_preview.dart:6:9 - Parameter 'key' could be a super parameter. Trying converting 'key' to a super parameter. - use_super_parameters
+   info - lib\preview\preview_web.dart:3:1 - 'dart:html' is deprecated and shouldn't be used. Use package:web and dart:js_interop instead. Try replacing the use of the deprecated member with the replacement. - deprecated_member_use
+
+50 issues found.
