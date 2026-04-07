@@ -7,11 +7,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'preview/live_preview.dart';
-import 'package:http/http.dart' as http;
+import 'package:google_generative_ai/google_generative_ai.dart';
 
-// Set this to your secure backend URL (e.g., http://localhost:3000/api/generate)
-// For Android emulator, you might need http://10.0.2.2:3000/api/generate
-const String backendApiUrl = 'http://localhost:3000/api/generate';
+// IMPORTANT: Replace this with your valid Gemini API Key.
+// WARNING: Hardcoding keys here is insecure for production. Anyone can see it.
+const String geminiApiKey = 'AIzaSyBpKPlGWnyFZlUBQBxDNh1Zlh95Dc3-jyU';
 
 // IMPORTANT: Replace these with your Supabase credentials!
 const String supabaseUrl = 'https://ldpodxtofvusyvpbxcta.supabase.co';
@@ -252,26 +252,26 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     }
 
     try {
-      final base64Image = base64Encode(imageBytes);
-
-      final response = await http.post(
-        Uri.parse(backendApiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'promptText': promptText.toString(),
-          'base64Image': base64Image,
-          'isInitialGeneration': isInitialGeneration,
-        }),
+      // Set up Gemini SDK
+      final model = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: geminiApiKey,
       );
 
-      if (response.statusCode != 200) {
-        return "<div style='color:red; margin:20px; font-family:sans-serif;'><b>Error:</b> Backend returned ${response.statusCode}: ${response.body}</div>";
+      final parts = <Part>[
+        TextPart(promptText.toString()),
+      ];
+
+      if (imageBytes.isNotEmpty) {
+        parts.add(DataPart('image/png', imageBytes));
       }
 
-      final jsonResponse = jsonDecode(response.body);
-      String text = jsonResponse['text'] ?? "";
+      final content = Content.multi(parts);
+      final response = await model.generateContent([content]);
+      
+      String text = response.text ?? "";
       debugPrint(
-        "========== BACKEND RAW RESPONSE ==========\n$text\n==========================================",
+        "========== GEMINI RAW RESPONSE ==========\n$text\n==========================================",
       );
 
       // Re-map images
@@ -1926,15 +1926,16 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     );
 
     try {
-      final response = await http.post(
-        Uri.parse(backendApiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'prompt': promptText.toString()}),
+      final model = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: geminiApiKey,
       );
+      final response = await model.generateContent([
+        Content.text(promptText.toString())
+      ]);
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        String text = data['text'] ?? '';
+      if (response.text != null) {
+        String text = response.text!;
 
         final htmlBlockRegex = RegExp(r'```(?:html|xml)\s*([\s\S]*?)```', caseSensitive: false);
         final genericBlockRegex = RegExp(r'```[a-zA-Z]*\s*([\s\S]*?)```');
@@ -2350,19 +2351,16 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     );
 
     try {
-      final response = await http.post(
-        Uri.parse(backendApiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'promptText': promptText.toString(),
-          'base64Image': "",
-          'isInitialGeneration': false,
-        }),
+      final model = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: geminiApiKey,
       );
+      final response = await model.generateContent([
+        Content.text(promptText.toString())
+      ]);
 
-      if (response.statusCode == 200) {
-        final jsonResponse = jsonDecode(response.body);
-        String text = jsonResponse['text'] ?? "";
+      if (response.text != null) {
+        String text = response.text!;
 
         final htmlBlockRegex = RegExp(r'```(?:html|xml)\s*([\s\S]*?)```', caseSensitive: false);
         final genericBlockRegex = RegExp(r'```[a-zA-Z]*\s*([\s\S]*?)```');
