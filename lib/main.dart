@@ -11,7 +11,7 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 
 // IMPORTANT: Replace this with your valid Gemini API Key.
 // WARNING: Hardcoding keys here is insecure for production. Anyone can see it.
-const String geminiApiKey = 'AIzaSyBpKPlGWnyFZlUBQBxDNh1Zlh95Dc3-jyU';
+const String geminiApiKey = 'AIzaSyBWhFX6E81NCAu7q8eetteMzFQkgMHU_M8';
 
 // IMPORTANT: Replace these with your Supabase credentials!
 const String supabaseUrl = 'https://ldpodxtofvusyvpbxcta.supabase.co';
@@ -87,6 +87,9 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   String get clarifySuggestion => ambiguities.isNotEmpty
       ? (ambiguities[currentAmbiguityIndex]['suggestion']?.toString() ?? "")
       : "";
+  bool get clarifyNeedsImage => ambiguities.isNotEmpty
+      ? (ambiguities[currentAmbiguityIndex]['needsImage'] == true)
+      : false;
 
   DrawingMode currentMode = DrawingMode.pen;
   bool _isPencilHovered = false;
@@ -97,6 +100,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   bool _isGenerateHovered = false;
   bool _isSelectHovered = false;
   bool _isImageHovered = false;
+  bool _isSketchHovered = false;
   Timer? _popupHideTimer;
 
   DrawingPoint? _selectedFrame;
@@ -203,7 +207,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       "1. RECOGNIZE SHAPES AS UI COMPONENTS: Rectangles are typically buttons, cards, images, or input fields. Identify the layout hierarchy and structural components.",
     );
     promptText.writeln(
-      "2. BE SMART: Ensure elements have realistic padding, margins, fonts, colors, and modern border-radii.",
+      "2. BE SMART: Ensure elements have realistic padding, margins, fonts, colors, and modern border-radii.It should look modern and appealing",
     );
     if (isDesktopMode) {
       promptText.writeln(
@@ -234,13 +238,14 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
 
     if (isInitialGeneration) {
       promptText.writeln(
-        "6. CLARIFICATION PHASE: You must NOT generate HTML yet. Analyze the provided wireframe/sketch. Identify any ambiguous placeholders like 'Enter text' or 'Button'. Ask about ambiguities ONE BY ONE. Identify the single most important ambiguity and ask ONLY that one. If there are multiple screens, you MUST analyze how they connect. Identify interactive elements (like nav tabs or buttons) and predict which screen they should link to. For the last clarification, you MUST confirm these connections by asking a question (e.g. 'Does clicking Profile go to screen_3?'). Output ONLY a JSON object exactly like this:\n"
+        "6. CLARIFICATION PHASE: You must NOT generate HTML yet. Analyze the provided wireframe/sketch. Identify any ambiguous placeholders like 'Enter text' or 'Button'. Ask about ambiguities ONE BY ONE. Identify the top 2-3 most ambiguous elements(only top 1 if you are confident about others) and ask about them first. If the sketch contains image frames with no image, you MUST include a clarification for it and set \"needsImage\" to true. If there are multiple screens, you MUST analyze how they connect. Identify interactive elements (like nav tabs or buttons) and predict which screen they should link to. For the last clarification, you MUST confirm these connections by asking a question (e.g. 'Does clicking Profile go to screen_3?'). Output ONLY a JSON object exactly like this:\n"
         '{\n'
         '  "type": "clarify",\n'
         '  "ambiguities": [\n'
         '    {\n'
         '      "question": "[Short, single concise question]",\n'
-        '      "suggestion": "[Brief design suggestion]"\n'
+        '      "suggestion": "[Brief design suggestion]",\n'
+        '      "needsImage": false\n'
         '    }\n'
         '  ]\n'
         '}\n',
@@ -258,9 +263,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         apiKey: geminiApiKey,
       );
 
-      final parts = <Part>[
-        TextPart(promptText.toString()),
-      ];
+      final parts = <Part>[TextPart(promptText.toString())];
 
       if (imageBytes.isNotEmpty) {
         parts.add(DataPart('image/png', imageBytes));
@@ -268,7 +271,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
 
       final content = Content.multi(parts);
       final response = await model.generateContent([content]);
-      
+
       String text = response.text ?? "";
       debugPrint(
         "========== GEMINI RAW RESPONSE ==========\n$text\n==========================================",
@@ -281,9 +284,12 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
 
       // Extract markdown blocks more robustly
       String cleanText = text.trim();
-      final htmlBlockRegex = RegExp(r'```(?:html|xml)\s*([\s\S]*?)```', caseSensitive: false);
+      final htmlBlockRegex = RegExp(
+        r'```(?:html|xml)\s*([\s\S]*?)```',
+        caseSensitive: false,
+      );
       final genericBlockRegex = RegExp(r'```[a-zA-Z]*\s*([\s\S]*?)```');
-      
+
       final htmlMatch = htmlBlockRegex.firstMatch(cleanText);
       if (htmlMatch != null) {
         cleanText = (htmlMatch.group(1) ?? cleanText).trim();
@@ -308,11 +314,18 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         text =
             '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>::-webkit-scrollbar { display: none; } html, body { margin: 0; padding: 0; width: 100%; height: 100%; -ms-overflow-style: none; scrollbar-width: none; }</style></head><body>\n$text\n</body></html>';
       } else if (!text.contains('::-webkit-scrollbar')) {
-        String styles = '<style>::-webkit-scrollbar { display: none; } html, body { margin: 0; padding: 0; width: 100%; height: 100%; -ms-overflow-style: none; scrollbar-width: none; }</style>';
+        String styles =
+            '<style>::-webkit-scrollbar { display: none; } html, body { margin: 0; padding: 0; width: 100%; height: 100%; -ms-overflow-style: none; scrollbar-width: none; }</style>';
         if (text.toLowerCase().contains('<head>')) {
-          text = text.replaceFirst(RegExp(r'<head>', caseSensitive: false), '<head>\n$styles');
+          text = text.replaceFirst(
+            RegExp(r'<head>', caseSensitive: false),
+            '<head>\n$styles',
+          );
         } else if (text.toLowerCase().contains('<body>')) {
-          text = text.replaceFirst(RegExp(r'<body>', caseSensitive: false), '<body>\n$styles');
+          text = text.replaceFirst(
+            RegExp(r'<body>', caseSensitive: false),
+            '<body>\n$styles',
+          );
         } else {
           text = styles + '\n' + text;
         }
@@ -425,8 +438,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     );
 
     if (mounted) {
-      if (htmlResponse.startsWith('{') && 
-          htmlResponse.contains('"clarify"')) {
+      if (htmlResponse.startsWith('{') && htmlResponse.contains('"clarify"')) {
         try {
           int start = htmlResponse.indexOf('{');
           int end = htmlResponse.lastIndexOf('}');
@@ -548,7 +560,6 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
       final frame = await codec.getNextFrame();
       final uiImage = frame.image;
 
-      // Add image to canvas right away
       setState(() {
         points.add(
           DrawingPoint(
@@ -558,6 +569,30 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
             type: ShapeType.image,
             image: uiImage,
             imageId: imageId,
+          ),
+        );
+      });
+    }
+  }
+
+  Future<void> _uploadSketch() async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+    if (image != null) {
+      final bytes = await image.readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final uiImage = frame.image;
+
+      setState(() {
+        points.insert(
+          0,
+          DrawingPoint(
+            point: const Offset(50, 50),
+            secondaryPoint: Offset(50.0 + uiImage.width, 50.0 + uiImage.height),
+            paint: Paint(),
+            type: ShapeType.sketch,
+            image: uiImage,
           ),
         );
       });
@@ -665,1091 +700,1203 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         fit: StackFit.expand,
         children: [
           Row(
-        children: [
-          _buildSidebar(),
-          // Left side: Drawable canvas and bottom prompt
-          Expanded(
-            flex: (_leftPanelFraction * 100).toInt(),
-            child: Container(
-              color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-              child: Stack(
-                alignment: Alignment.bottomCenter,
-                fit: StackFit.expand,
-                children: [
-                  Stack(
+            children: [
+              _buildSidebar(),
+              // Left side: Drawable canvas and bottom prompt
+              Expanded(
+                flex: (_leftPanelFraction * 100).toInt(),
+                child: Container(
+                  color: isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
+                  child: Stack(
+                    alignment: Alignment.bottomCenter,
+                    fit: StackFit.expand,
                     children: [
-                      // Sketch Area inside RepaintBoundary for image capture
-                      InteractiveViewer(
-                        transformationController: _transformationController,
-                        panEnabled: currentMode == DrawingMode.select,
-                        scaleEnabled: currentMode == DrawingMode.select,
-                        minScale: 0.1,
-                        maxScale: 4.0,
-                        boundaryMargin: const EdgeInsets.all(double.infinity),
-                        child: RepaintBoundary(
-                          key: _canvasKey,
-                          child: Container(
-                            color: Colors.white,
-                            width: 3000,
-                            height: 3000,
-                            child: MouseRegion(
-                              cursor: currentMode == DrawingMode.select
-                                  ? SystemMouseCursors.move
-                                  : SystemMouseCursors.basic,
-                              child: GestureDetector(
-                              onTapDown: (details) {
-                                // If editing, tapping outside closes it
-                                if (_editingElement != null) {
-                                  setState(() {
-                                    _editingElement!.text =
-                                        _elementTextController.text;
-                                    _editingElement = null;
-                                  });
-                                  return;
-                                }
+                      Stack(
+                        children: [
+                          // Sketch Area inside RepaintBoundary for image capture
+                          InteractiveViewer(
+                            transformationController: _transformationController,
+                            panEnabled: currentMode == DrawingMode.select,
+                            scaleEnabled: currentMode == DrawingMode.select,
+                            minScale: 0.1,
+                            maxScale: 4.0,
+                            boundaryMargin: const EdgeInsets.all(
+                              double.infinity,
+                            ),
+                            child: RepaintBoundary(
+                              key: _canvasKey,
+                              child: Container(
+                                color: Colors.white,
+                                width: 3000,
+                                height: 3000,
+                                child: MouseRegion(
+                                  cursor: currentMode == DrawingMode.select
+                                      ? SystemMouseCursors.move
+                                      : SystemMouseCursors.basic,
+                                  child: GestureDetector(
+                                    onTapDown: (details) {
+                                      // If editing, tapping outside closes it
+                                      if (_editingElement != null) {
+                                        setState(() {
+                                          _editingElement!.text =
+                                              _elementTextController.text;
+                                          _editingElement = null;
+                                        });
+                                        return;
+                                      }
 
-                                if (currentMode == DrawingMode.text) {
-                                  _addTextToCanvas(details.localPosition);
-                                } else if (currentMode == DrawingMode.button) {
-                                  _addButtonToCanvas(details.localPosition);
-                                } else if (currentMode == DrawingMode.select) {
-                                  // 1. Check if we are interacting with resize handles of the currently selected element
-                                  if (_selectedFrame != null &&
-                                      _selectedFrame!.secondaryPoint != null) {
-                                    Rect selectedRect = Rect.fromPoints(
-                                      _selectedFrame!.point,
-                                      _selectedFrame!.secondaryPoint!,
-                                    );
-                                    if (_selectedFrame!.type ==
-                                        ShapeType.text) {
-                                      selectedRect = Rect.fromLTWH(
-                                        _selectedFrame!.point.dx,
-                                        _selectedFrame!.point.dy,
-                                        80,
-                                        20,
-                                      );
-                                    }
-
-                                    ResizeHandle hitHandle =
-                                        _hitTestResizeHandles(
+                                      if (currentMode == DrawingMode.text) {
+                                        _addTextToCanvas(details.localPosition);
+                                      } else if (currentMode ==
+                                          DrawingMode.button) {
+                                        _addButtonToCanvas(
                                           details.localPosition,
-                                          selectedRect,
                                         );
-                                    if (hitHandle != ResizeHandle.none) {
-                                      _activeResizeHandle = hitHandle;
-                                      _dragStartOffset = details.localPosition;
-                                      _initialFrameRect = selectedRect;
-
-                                      // Save initial rects of all children if it's a frame
-                                      _initialChildRects.clear();
-                                      if (_selectedFrame!.type ==
-                                          ShapeType.frame) {
-                                        for (var child in _dragChildren) {
-                                          if (child.secondaryPoint != null) {
-                                            _initialChildRects[child] =
-                                                Rect.fromPoints(
-                                                  child.point,
-                                                  child.secondaryPoint!,
-                                                );
-                                          } else if (child.type ==
+                                      } else if (currentMode ==
+                                          DrawingMode.select) {
+                                        // 1. Check if we are interacting with resize handles of the currently selected element
+                                        if (_selectedFrame != null &&
+                                            _selectedFrame!.secondaryPoint !=
+                                                null) {
+                                          Rect selectedRect = Rect.fromPoints(
+                                            _selectedFrame!.point,
+                                            _selectedFrame!.secondaryPoint!,
+                                          );
+                                          if (_selectedFrame!.type ==
                                               ShapeType.text) {
-                                            _initialChildRects[child] =
-                                                Rect.fromLTWH(
-                                                  child.point.dx,
-                                                  child.point.dy,
-                                                  80,
-                                                  20,
-                                                );
+                                            selectedRect = Rect.fromLTWH(
+                                              _selectedFrame!.point.dx,
+                                              _selectedFrame!.point.dy,
+                                              80,
+                                              20,
+                                            );
+                                          }
+
+                                          ResizeHandle hitHandle =
+                                              _hitTestResizeHandles(
+                                                details.localPosition,
+                                                selectedRect,
+                                              );
+                                          if (hitHandle != ResizeHandle.none) {
+                                            _activeResizeHandle = hitHandle;
+                                            _dragStartOffset =
+                                                details.localPosition;
+                                            _initialFrameRect = selectedRect;
+
+                                            // Save initial rects of all children if it's a frame
+                                            _initialChildRects.clear();
+                                            if (_selectedFrame!.type ==
+                                                ShapeType.frame) {
+                                              for (var child in _dragChildren) {
+                                                if (child.secondaryPoint !=
+                                                    null) {
+                                                  _initialChildRects[child] =
+                                                      Rect.fromPoints(
+                                                        child.point,
+                                                        child.secondaryPoint!,
+                                                      );
+                                                } else if (child.type ==
+                                                    ShapeType.text) {
+                                                  _initialChildRects[child] =
+                                                      Rect.fromLTWH(
+                                                        child.point.dx,
+                                                        child.point.dy,
+                                                        80,
+                                                        20,
+                                                      );
+                                                }
+                                              }
+                                            }
+                                            return; // Handle interacted, skip selecting new elements
                                           }
                                         }
-                                      }
-                                      return; // Handle interacted, skip selecting new elements
-                                    }
-                                  }
 
-                                  _activeResizeHandle = ResizeHandle.none;
-                                  _selectedFrame = null;
-                                  _dragChildren.clear();
-                                  for (var i = points.length - 1; i >= 0; i--) {
-                                    var p = points[i];
-                                    if (p.secondaryPoint != null &&
-                                        p.type != ShapeType.line) {
-                                      Rect r = Rect.fromPoints(
-                                        p.point,
-                                        p.secondaryPoint!,
-                                      );
-                                      // Make frame selection robust (only edge for frames)
-                                      if (p.type == ShapeType.frame) {
-                                        Rect outerR = r.inflate(20);
-                                        Rect innerR = r.deflate(20);
-                                        if (outerR.contains(
-                                              details.localPosition,
-                                            ) &&
-                                            !innerR.contains(
+                                        _activeResizeHandle = ResizeHandle.none;
+                                        _selectedFrame = null;
+                                        _dragChildren.clear();
+                                        for (
+                                          var i = points.length - 1;
+                                          i >= 0;
+                                          i--
+                                        ) {
+                                          var p = points[i];
+                                          if (p.secondaryPoint != null &&
+                                              p.type != ShapeType.line) {
+                                            Rect r = Rect.fromPoints(
+                                              p.point,
+                                              p.secondaryPoint!,
+                                            );
+                                            // Make frame selection robust (only edge for frames)
+                                            if (p.type == ShapeType.frame) {
+                                              Rect outerR = r.inflate(20);
+                                              Rect innerR = r.deflate(20);
+                                              if (outerR.contains(
+                                                    details.localPosition,
+                                                  ) &&
+                                                  !innerR.contains(
+                                                    details.localPosition,
+                                                  )) {
+                                                _selectedFrame = p;
+                                                _dragStartOffset =
+                                                    details.localPosition;
+
+                                                // Find all elements fully inside the frame
+                                                for (var sibling in points) {
+                                                  if (sibling != p &&
+                                                      sibling.secondaryPoint !=
+                                                          null &&
+                                                      sibling.type !=
+                                                          ShapeType.line &&
+                                                      sibling.type !=
+                                                          ShapeType.frame) {
+                                                    Rect
+                                                    sRect = Rect.fromPoints(
+                                                      sibling.point,
+                                                      sibling.secondaryPoint!,
+                                                    );
+                                                    // Only consider fully contained children, not just overlaps
+                                                    if (r.intersect(sRect) ==
+                                                        sRect) {
+                                                      _dragChildren.add(
+                                                        sibling,
+                                                      );
+                                                    }
+                                                  } else if (sibling.type ==
+                                                      ShapeType.text) {
+                                                    // Approximate text rect
+                                                    Rect tRect = Rect.fromLTWH(
+                                                      sibling.point.dx,
+                                                      sibling.point.dy,
+                                                      80,
+                                                      20,
+                                                    );
+                                                    if (r.intersect(tRect) ==
+                                                        tRect) {
+                                                      _dragChildren.add(
+                                                        sibling,
+                                                      );
+                                                    }
+                                                  }
+                                                }
+                                                break;
+                                              }
+                                            } else {
+                                              // General drag for image, rect, button, text
+                                              if (r.contains(
+                                                details.localPosition,
+                                              )) {
+                                                _selectedFrame = p;
+                                                _dragStartOffset =
+                                                    details.localPosition;
+                                                break;
+                                              }
+                                            }
+                                          } else if (p.type == ShapeType.text &&
+                                              p.point != Offset.infinite) {
+                                            Rect r = Rect.fromLTWH(
+                                              p.point.dx,
+                                              p.point.dy,
+                                              120,
+                                              40,
+                                            );
+                                            if (r.contains(
                                               details.localPosition,
                                             )) {
-                                          _selectedFrame = p;
-                                          _dragStartOffset =
-                                              details.localPosition;
-
-                                          // Find all elements fully inside the frame
-                                          for (var sibling in points) {
-                                            if (sibling != p &&
-                                                sibling.secondaryPoint != null &&
-                                                sibling.type != ShapeType.line &&
-                                                sibling.type != ShapeType.frame) {
-                                              Rect sRect = Rect.fromPoints(
-                                                sibling.point,
-                                                sibling.secondaryPoint!,
-                                              );
-                                              // Only consider fully contained children, not just overlaps
-                                              if (r.intersect(sRect) == sRect) {
-                                                _dragChildren.add(sibling);
-                                              }
-                                            } else if (sibling.type == ShapeType.text) {
-                                              // Approximate text rect
-                                              Rect tRect = Rect.fromLTWH(
-                                                sibling.point.dx,
-                                                sibling.point.dy,
-                                                80,
-                                                20,
-                                              );
-                                              if (r.intersect(tRect) == tRect) {
-                                                _dragChildren.add(sibling);
-                                              }
-                                            }
-                                          }
-                                          break;
-                                        }
-                                      } else {
-                                        // General drag for image, rect, button, text
-                                        if (r.contains(details.localPosition)) {
-                                          _selectedFrame = p;
-                                          _dragStartOffset =
-                                              details.localPosition;
-                                          break;
-                                        }
-                                      }
-                                    } else if (p.type == ShapeType.text &&
-                                        p.point != Offset.infinite) {
-                                      Rect r = Rect.fromLTWH(
-                                        p.point.dx,
-                                        p.point.dy,
-                                        120,
-                                        40,
-                                      );
-                                      if (r.contains(details.localPosition)) {
-                                        _selectedFrame = p;
-                                        _dragStartOffset =
-                                            details.localPosition;
-                                        break;
-                                      }
-                                    }
-                                  }
-
-                                  // Handle double tap to edit button/text
-                                  if (_selectedFrame != null &&
-                                      (_selectedFrame!.type ==
-                                              ShapeType.button ||
-                                          _selectedFrame!.type ==
-                                              ShapeType.text)) {
-                                    // To correctly handle double tap we would need a gesture recognizer,
-                                    // but as a quick logic: if we tapped it, maybe enter edit mode?
-                                    // We'll enter edit mode if they just tap without dragging (handled below).
-                                  }
-                                }
-                              },
-                              onDoubleTapDown: (details) {
-                                if (currentMode == DrawingMode.select) {
-                                  for (var i = points.length - 1; i >= 0; i--) {
-                                    var p = points[i];
-                                    // check bounds
-                                    Rect r;
-                                    if (p.secondaryPoint != null) {
-                                      r = Rect.fromPoints(
-                                        p.point,
-                                        p.secondaryPoint!,
-                                      );
-                                    } else {
-                                      r = Rect.fromLTWH(
-                                        p.point.dx,
-                                        p.point.dy,
-                                        120,
-                                        40,
-                                      );
-                                    }
-                                    if (r.contains(details.localPosition) &&
-                                        (p.type == ShapeType.button ||
-                                            p.type == ShapeType.text)) {
-                                      setState(() {
-                                        _editingElement = p;
-                                        _elementTextController.text =
-                                            p.text ?? "";
-                                      });
-                                      break;
-                                    }
-                                  }
-                                }
-                              },
-                              onPanStart: (details) {
-                                if (currentMode == DrawingMode.text ||
-                                    currentMode == DrawingMode.button ||
-                                    currentMode == DrawingMode.select)
-                                  return;
-                                setState(() {
-                                  if (currentMode == DrawingMode.pen) {
-                                    points.add(
-                                      DrawingPoint(
-                                        point: details.localPosition,
-                                        paint: Paint()
-                                          ..strokeCap = StrokeCap.round
-                                          ..isAntiAlias = true
-                                          ..color = Colors.black
-                                          ..strokeWidth = 3.0,
-                                      ),
-                                    );
-                                  } else {
-                                    points.add(
-                                      DrawingPoint(
-                                        point: details.localPosition,
-                                        secondaryPoint: details.localPosition,
-                                        type:
-                                            currentMode == DrawingMode.rectangle
-                                            ? ShapeType.rectangle
-                                            : ShapeType.circle,
-                                        paint: Paint()
-                                          ..color = Colors.black
-                                          ..strokeWidth = 3.0
-                                          ..style = PaintingStyle.stroke,
-                                      ),
-                                    );
-                                  }
-                                });
-                              },
-                              onPanUpdate: (details) {
-                                if (currentMode == DrawingMode.text ||
-                                    currentMode == DrawingMode.button)
-                                  return;
-
-                                if (currentMode == DrawingMode.select &&
-                                    _selectedFrame != null &&
-                                    _dragStartOffset != null) {
-                                  setState(() {
-                                    Offset delta =
-                                        details.localPosition -
-                                        _dragStartOffset!;
-
-                                    if (_activeResizeHandle !=
-                                            ResizeHandle.none &&
-                                        _initialFrameRect != null &&
-                                        _selectedFrame!.secondaryPoint !=
-                                            null) {
-                                      double left = _selectedFrame!.point.dx;
-                                      double top = _selectedFrame!.point.dy;
-                                      double right =
-                                          _selectedFrame!.secondaryPoint!.dx;
-                                      double bottom =
-                                          _selectedFrame!.secondaryPoint!.dy;
-
-                                      if (_activeResizeHandle ==
-                                              ResizeHandle.topLeft ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.centerLeft ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.bottomLeft) {
-                                        left += delta.dx;
-                                      }
-                                      if (_activeResizeHandle ==
-                                              ResizeHandle.topRight ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.centerRight ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.bottomRight) {
-                                        right += delta.dx;
-                                      }
-                                      if (_activeResizeHandle ==
-                                              ResizeHandle.topLeft ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.topCenter ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.topRight) {
-                                        top += delta.dy;
-                                      }
-                                      if (_activeResizeHandle ==
-                                              ResizeHandle.bottomLeft ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.bottomCenter ||
-                                          _activeResizeHandle ==
-                                              ResizeHandle.bottomRight) {
-                                        bottom += delta.dy;
-                                      }
-
-                                      if (right - left < 40) {
-                                        if (left != _selectedFrame!.point.dx)
-                                          left = right - 40;
-                                        else
-                                          right = left + 40;
-                                      }
-                                      if (bottom - top < 40) {
-                                        if (top != _selectedFrame!.point.dy)
-                                          top = bottom - 40;
-                                        else
-                                          bottom = top + 40;
-                                      }
-
-                                      _selectedFrame!.point = Offset(left, top);
-                                      _selectedFrame!.secondaryPoint = Offset(
-                                        right,
-                                        bottom,
-                                      );
-
-                                      if (_selectedFrame!.type ==
-                                              ShapeType.frame &&
-                                          _initialFrameRect!.width > 0 &&
-                                          _initialFrameRect!.height > 0) {
-                                        double scaleX =
-                                            (right - left) /
-                                            _initialFrameRect!.width;
-                                        double scaleY =
-                                            (bottom - top) /
-                                            _initialFrameRect!.height;
-                                        for (var child in _dragChildren) {
-                                          if (_initialChildRects.containsKey(
-                                            child,
-                                          )) {
-                                            Rect initRect =
-                                                _initialChildRects[child]!;
-                                            double childLeft =
-                                                left +
-                                                (initRect.left -
-                                                        _initialFrameRect!
-                                                            .left) *
-                                                    scaleX;
-                                            double childTop =
-                                                top +
-                                                (initRect.top -
-                                                        _initialFrameRect!
-                                                            .top) *
-                                                    scaleY;
-                                            double childRight =
-                                                left +
-                                                (initRect.right -
-                                                        _initialFrameRect!
-                                                            .left) *
-                                                    scaleX;
-                                            double childBottom =
-                                                top +
-                                                (initRect.bottom -
-                                                        _initialFrameRect!
-                                                            .top) *
-                                                    scaleY;
-
-                                            child.point = Offset(
-                                              childLeft,
-                                              childTop,
-                                            );
-                                            if (child.secondaryPoint != null) {
-                                              child.secondaryPoint = Offset(
-                                                childRight,
-                                                childBottom,
-                                              );
+                                              _selectedFrame = p;
+                                              _dragStartOffset =
+                                                  details.localPosition;
+                                              break;
                                             }
                                           }
                                         }
-                                      }
-                                      _dragStartOffset = details.localPosition;
-                                    } else {
-                                      _selectedFrame!.point += delta;
-                                      if (_selectedFrame!.secondaryPoint !=
-                                          null) {
-                                        _selectedFrame!.secondaryPoint =
-                                            _selectedFrame!.secondaryPoint! +
-                                            delta;
-                                      }
-                                      for (var child in _dragChildren) {
-                                        child.point += delta;
-                                        if (child.secondaryPoint != null) {
-                                          child.secondaryPoint =
-                                              child.secondaryPoint! + delta;
+
+                                        // Handle double tap to edit button/text
+                                        if (_selectedFrame != null &&
+                                            (_selectedFrame!.type ==
+                                                    ShapeType.button ||
+                                                _selectedFrame!.type ==
+                                                    ShapeType.text)) {
+                                          // To correctly handle double tap we would need a gesture recognizer,
+                                          // but as a quick logic: if we tapped it, maybe enter edit mode?
+                                          // We'll enter edit mode if they just tap without dragging (handled below).
                                         }
                                       }
-                                      _dragStartOffset = details.localPosition;
-                                    }
-                                  });
-                                  return;
-                                } else if (currentMode == DrawingMode.select) {
-                                  return;
-                                }
-
-                                setState(() {
-                                  if (currentMode == DrawingMode.pen) {
-                                    points.add(
-                                      DrawingPoint(
-                                        point: details.localPosition,
-                                        paint: Paint()
-                                          ..strokeCap = StrokeCap.round
-                                          ..isAntiAlias = true
-                                          ..color = Colors.black
-                                          ..strokeWidth = 3.0,
-                                      ),
-                                    );
-                                  } else if (currentMode ==
-                                          DrawingMode.rectangle ||
-                                      currentMode == DrawingMode.circle) {
-                                    if (points.isNotEmpty &&
-                                        (points.last.type ==
-                                                ShapeType.rectangle ||
-                                            points.last.type ==
-                                                ShapeType.circle)) {
-                                      points.last.secondaryPoint =
-                                          details.localPosition;
-                                    }
-                                  }
-                                });
-                              },
-                              onPanEnd: (details) async {
-                                if (currentMode == DrawingMode.text ||
-                                    currentMode == DrawingMode.button)
-                                  return;
-                                if (currentMode == DrawingMode.select) {
-                                  _dragStartOffset = null;
-                                  return;
-                                }
-                                setState(() {
-                                  if (currentMode == DrawingMode.pen) {
-                                    points.add(
-                                      DrawingPoint(
-                                        point: Offset.infinite,
-                                        paint: Paint(),
-                                      ),
-                                    );
-                                  }
-                                });
-                              },
-                              child: CustomPaint(
-                                painter: DrawingPainter(
-                                  pointsList: points,
-                                  selectedPoint: _selectedFrame,
-                                  isDesktopMode: isDesktopMode,
-                                ),
-                                size: const Size(3000, 3000),
-                              ),
-                            ), // closes GestureDetector
-                          ), // closes MouseRegion
-                        ), // closes Container
-                      ), // closes RepaintBoundary
-                    ), // closes InteractiveViewer
-
-                      // Floating Input field for editable text
-                      if (_editingElement != null &&
-                          _editingElement!.secondaryPoint != null)
-                        Positioned(
-                          left:
-                              _editingElement!.point.dx <
-                                  _editingElement!.secondaryPoint!.dx
-                              ? _editingElement!.point.dx
-                              : _editingElement!.secondaryPoint!.dx,
-                          top:
-                              _editingElement!.point.dy <
-                                  _editingElement!.secondaryPoint!.dy
-                              ? _editingElement!.point.dy
-                              : _editingElement!.secondaryPoint!.dy,
-                          child: Container(
-                            width:
-                                (_editingElement!.secondaryPoint!.dx -
-                                        _editingElement!.point.dx)
-                                    .abs(),
-                            height:
-                                (_editingElement!.secondaryPoint!.dy -
-                                        _editingElement!.point.dy)
-                                    .abs(),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: Colors.blueAccent,
-                                width: 2,
-                              ),
-                              color: Colors.white.withOpacity(0.9),
-                            ),
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: Center(
-                              child: TextField(
-                                controller: _elementTextController,
-                                autofocus: true,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.black,
-                                ),
-                                decoration: const InputDecoration(
-                                  border: InputBorder.none,
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                ),
-                                onSubmitted: (val) {
-                                  setState(() {
-                                    _editingElement!.text = val;
-                                    _editingElement = null;
-                                  });
-                                },
-                              ),
-                            ),
-                          ),
-                        ),
-                      if (_editingElement != null &&
-                          _editingElement!.type == ShapeType.text)
-                        Positioned(
-                          left: _editingElement!.point.dx,
-                          top: _editingElement!.point.dy,
-                          child: Container(
-                            width: 150,
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: Colors.blueAccent,
-                                width: 2,
-                              ),
-                              color: Colors.white.withOpacity(0.9),
-                            ),
-                            child: TextField(
-                              controller: _elementTextController,
-                              autofocus: true,
-                              style: const TextStyle(
-                                fontSize: 20,
-                                color: Colors.black,
-                              ),
-                              decoration: const InputDecoration(
-                                border: InputBorder.none,
-                                isDense: true,
-                                contentPadding: EdgeInsets.all(4),
-                              ),
-                              onSubmitted: (val) {
-                                setState(() {
-                                  _editingElement!.text = val;
-                                  _editingElement = null;
-                                });
-                              },
-                            ),
-                          ),
-                        ),
-
-                      // Top Right Action Tab (Undo & Clear)
-                      Positioned(
-                        top: 20,
-                        right: 20,
-                        child: Container(
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: isDarkMode ? const Color(0xFF2A2A2A) : Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isDarkMode ? Colors.white24 : Colors.grey.shade400,
-                              width: 1.0,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
-                                blurRadius: 12,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Tooltip(
-                                message: 'Undo',
-                                child: InkWell(
-                                  onTap: () {
-                                    setState(() {
-                                      if (points.isNotEmpty) {
-                                        points.removeLast();
-                                      }
-                                    });
-                                  },
-                                  child: Icon(
-                                    Icons.undo,
-                                    color: isDarkMode ? Colors.white70 : Colors.black87,
-                                    size: 20,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Container(
-                                width: 1,
-                                height: 20,
-                                color: isDarkMode ? Colors.white24 : Colors.grey.shade300,
-                              ),
-                              const SizedBox(width: 12),
-                              Tooltip(
-                                message: 'Clear Canvas',
-                                child: InkWell(
-                                  onTap: () {
-                                    setState(() {
-                                      points.clear();
-                                      hasGenerated = false;
-                                      generatedHtml = "";
-                                      isClarifying = false;
-                                      _promptController.clear();
-                                      currentMode = DrawingMode.pen;
-                                      uploadedImages.clear();
-                                      _imageCounter = 0;
-                                      _editingElement = null;
-                                      ambiguities.clear();
-                                      currentAmbiguityIndex = 0;
-                                    });
-                                  },
-                                  child: const Icon(
-                                    Icons.delete_outline,
-                                    color: Colors.redAccent,
-                                    size: 20,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  // Bottom generator bar using precisely the new UI
-                  Positioned(
-                    bottom: 30.0,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: isDarkMode
-                                ? const Color(0xFF2A2A2A)
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isDarkMode
-                                  ? Colors.white24
-                                  : Colors.grey.shade400,
-                              width: 1.0,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
-                                blurRadius: 12,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                onEnter: (_) =>
-                                    setState(() => _isAddHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isAddHovered = false),
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      final int newFrameIndex =
-                                          points
-                                              .where(
-                                                (p) =>
-                                                    p.type == ShapeType.frame,
-                                              )
-                                              .length +
-                                          1;
-                                      points.add(
-                                        DrawingPoint(
-                                          point: const Offset(40, 40),
-                                          secondaryPoint: const Offset(
-                                            360,
-                                            690,
-                                          ),
-                                          type: ShapeType.frame,
-                                          text: "screen_$newFrameIndex",
-                                          paint: Paint()
-                                            ..color = Colors.blueAccent
-                                            ..strokeWidth = 6.0
-                                            ..style = PaintingStyle.stroke,
-                                        ),
-                                      );
-                                    });
-                                  },
-                                  child: Icon(
-                                    Icons.add,
-                                    color: isDarkMode
-                                        ? Colors.white
-                                        : Colors.black87,
-                                    size: 24,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 24),
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                onEnter: (_) =>
-                                    setState(() => _isSelectHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isSelectHovered = false),
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      currentMode = DrawingMode.select;
-                                    });
-                                  },
-                                  child: Icon(
-                                    Icons.pan_tool_alt_outlined,
-                                    color: currentMode == DrawingMode.select
-                                        ? Colors.blueAccent
-                                        : (isDarkMode
-                                              ? Colors.white
-                                              : Colors.black87),
-                                    size: 22,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 24),
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                onEnter: (_) =>
-                                    setState(() => _isImageHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isImageHovered = false),
-                                child: GestureDetector(
-                                  onTap: _pickImage,
-                                  child: Icon(
-                                    Icons.image_outlined,
-                                    color: isDarkMode
-                                        ? Colors.white
-                                        : Colors.black87,
-                                    size: 22,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 24),
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                onEnter: (_) {
-                                  _popupHideTimer?.cancel();
-                                  setState(() => _isPencilHovered = true);
-                                },
-                                onExit: (_) {
-                                  setState(() => _isPencilHovered = false);
-                                  _popupHideTimer = Timer(
-                                    const Duration(milliseconds: 2000),
-                                    () {
-                                      if (mounted) setState(() {});
                                     },
-                                  );
-                                },
-                                child: GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      if (currentMode != DrawingMode.pen) {
-                                        currentMode = DrawingMode.pen;
+                                    onDoubleTapDown: (details) {
+                                      if (currentMode == DrawingMode.select) {
+                                        for (
+                                          var i = points.length - 1;
+                                          i >= 0;
+                                          i--
+                                        ) {
+                                          var p = points[i];
+                                          // check bounds
+                                          Rect r;
+                                          if (p.secondaryPoint != null) {
+                                            r = Rect.fromPoints(
+                                              p.point,
+                                              p.secondaryPoint!,
+                                            );
+                                          } else {
+                                            r = Rect.fromLTWH(
+                                              p.point.dx,
+                                              p.point.dy,
+                                              120,
+                                              40,
+                                            );
+                                          }
+                                          if (r.contains(
+                                                details.localPosition,
+                                              ) &&
+                                              (p.type == ShapeType.button ||
+                                                  p.type == ShapeType.text)) {
+                                            setState(() {
+                                              _editingElement = p;
+                                              _elementTextController.text =
+                                                  p.text ?? "";
+                                            });
+                                            break;
+                                          }
+                                        }
                                       }
-                                    });
-                                  },
-                                  child: Icon(
-                                    Icons.draw_outlined,
-                                    color: currentMode == DrawingMode.pen
-                                        ? Colors.blueAccent
-                                        : (isDarkMode
-                                              ? Colors.white
-                                              : Colors.black87),
-                                    size: 22,
+                                    },
+                                    onPanStart: (details) {
+                                      if (currentMode == DrawingMode.text ||
+                                          currentMode == DrawingMode.button ||
+                                          currentMode == DrawingMode.select)
+                                        return;
+                                      setState(() {
+                                        if (currentMode == DrawingMode.pen) {
+                                          points.add(
+                                            DrawingPoint(
+                                              point: details.localPosition,
+                                              paint: Paint()
+                                                ..strokeCap = StrokeCap.round
+                                                ..isAntiAlias = true
+                                                ..color = Colors.black
+                                                ..strokeWidth = 3.0,
+                                            ),
+                                          );
+                                        } else {
+                                          points.add(
+                                            DrawingPoint(
+                                              point: details.localPosition,
+                                              secondaryPoint:
+                                                  details.localPosition,
+                                              type:
+                                                  currentMode ==
+                                                      DrawingMode.rectangle
+                                                  ? ShapeType.rectangle
+                                                  : ShapeType.circle,
+                                              paint: Paint()
+                                                ..color = Colors.black
+                                                ..strokeWidth = 3.0
+                                                ..style = PaintingStyle.stroke,
+                                            ),
+                                          );
+                                        }
+                                      });
+                                    },
+                                    onPanUpdate: (details) {
+                                      if (currentMode == DrawingMode.text ||
+                                          currentMode == DrawingMode.button)
+                                        return;
+
+                                      if (currentMode == DrawingMode.select &&
+                                          _selectedFrame != null &&
+                                          _dragStartOffset != null) {
+                                        setState(() {
+                                          Offset delta =
+                                              details.localPosition -
+                                              _dragStartOffset!;
+
+                                          if (_activeResizeHandle !=
+                                                  ResizeHandle.none &&
+                                              _initialFrameRect != null &&
+                                              _selectedFrame!.secondaryPoint !=
+                                                  null) {
+                                            double left =
+                                                _selectedFrame!.point.dx;
+                                            double top =
+                                                _selectedFrame!.point.dy;
+                                            double right = _selectedFrame!
+                                                .secondaryPoint!
+                                                .dx;
+                                            double bottom = _selectedFrame!
+                                                .secondaryPoint!
+                                                .dy;
+
+                                            if (_activeResizeHandle ==
+                                                    ResizeHandle.topLeft ||
+                                                _activeResizeHandle ==
+                                                    ResizeHandle.centerLeft ||
+                                                _activeResizeHandle ==
+                                                    ResizeHandle.bottomLeft) {
+                                              left += delta.dx;
+                                            }
+                                            if (_activeResizeHandle ==
+                                                    ResizeHandle.topRight ||
+                                                _activeResizeHandle ==
+                                                    ResizeHandle.centerRight ||
+                                                _activeResizeHandle ==
+                                                    ResizeHandle.bottomRight) {
+                                              right += delta.dx;
+                                            }
+                                            if (_activeResizeHandle ==
+                                                    ResizeHandle.topLeft ||
+                                                _activeResizeHandle ==
+                                                    ResizeHandle.topCenter ||
+                                                _activeResizeHandle ==
+                                                    ResizeHandle.topRight) {
+                                              top += delta.dy;
+                                            }
+                                            if (_activeResizeHandle ==
+                                                    ResizeHandle.bottomLeft ||
+                                                _activeResizeHandle ==
+                                                    ResizeHandle.bottomCenter ||
+                                                _activeResizeHandle ==
+                                                    ResizeHandle.bottomRight) {
+                                              bottom += delta.dy;
+                                            }
+
+                                            if (right - left < 40) {
+                                              if (left !=
+                                                  _selectedFrame!.point.dx)
+                                                left = right - 40;
+                                              else
+                                                right = left + 40;
+                                            }
+                                            if (bottom - top < 40) {
+                                              if (top !=
+                                                  _selectedFrame!.point.dy)
+                                                top = bottom - 40;
+                                              else
+                                                bottom = top + 40;
+                                            }
+
+                                            _selectedFrame!.point = Offset(
+                                              left,
+                                              top,
+                                            );
+                                            _selectedFrame!.secondaryPoint =
+                                                Offset(right, bottom);
+
+                                            if (_selectedFrame!.type ==
+                                                    ShapeType.frame &&
+                                                _initialFrameRect!.width > 0 &&
+                                                _initialFrameRect!.height > 0) {
+                                              double scaleX =
+                                                  (right - left) /
+                                                  _initialFrameRect!.width;
+                                              double scaleY =
+                                                  (bottom - top) /
+                                                  _initialFrameRect!.height;
+                                              for (var child in _dragChildren) {
+                                                if (_initialChildRects
+                                                    .containsKey(child)) {
+                                                  Rect initRect =
+                                                      _initialChildRects[child]!;
+                                                  double childLeft =
+                                                      left +
+                                                      (initRect.left -
+                                                              _initialFrameRect!
+                                                                  .left) *
+                                                          scaleX;
+                                                  double childTop =
+                                                      top +
+                                                      (initRect.top -
+                                                              _initialFrameRect!
+                                                                  .top) *
+                                                          scaleY;
+                                                  double childRight =
+                                                      left +
+                                                      (initRect.right -
+                                                              _initialFrameRect!
+                                                                  .left) *
+                                                          scaleX;
+                                                  double childBottom =
+                                                      top +
+                                                      (initRect.bottom -
+                                                              _initialFrameRect!
+                                                                  .top) *
+                                                          scaleY;
+
+                                                  child.point = Offset(
+                                                    childLeft,
+                                                    childTop,
+                                                  );
+                                                  if (child.secondaryPoint !=
+                                                      null) {
+                                                    child.secondaryPoint =
+                                                        Offset(
+                                                          childRight,
+                                                          childBottom,
+                                                        );
+                                                  }
+                                                }
+                                              }
+                                            }
+                                            _dragStartOffset =
+                                                details.localPosition;
+                                          } else {
+                                            _selectedFrame!.point += delta;
+                                            if (_selectedFrame!
+                                                    .secondaryPoint !=
+                                                null) {
+                                              _selectedFrame!.secondaryPoint =
+                                                  _selectedFrame!
+                                                      .secondaryPoint! +
+                                                  delta;
+                                            }
+                                            for (var child in _dragChildren) {
+                                              child.point += delta;
+                                              if (child.secondaryPoint !=
+                                                  null) {
+                                                child.secondaryPoint =
+                                                    child.secondaryPoint! +
+                                                    delta;
+                                              }
+                                            }
+                                            _dragStartOffset =
+                                                details.localPosition;
+                                          }
+                                        });
+                                        return;
+                                      } else if (currentMode ==
+                                          DrawingMode.select) {
+                                        return;
+                                      }
+
+                                      setState(() {
+                                        if (currentMode == DrawingMode.pen) {
+                                          points.add(
+                                            DrawingPoint(
+                                              point: details.localPosition,
+                                              paint: Paint()
+                                                ..strokeCap = StrokeCap.round
+                                                ..isAntiAlias = true
+                                                ..color = Colors.black
+                                                ..strokeWidth = 3.0,
+                                            ),
+                                          );
+                                        } else if (currentMode ==
+                                                DrawingMode.rectangle ||
+                                            currentMode == DrawingMode.circle) {
+                                          if (points.isNotEmpty &&
+                                              (points.last.type ==
+                                                      ShapeType.rectangle ||
+                                                  points.last.type ==
+                                                      ShapeType.circle)) {
+                                            points.last.secondaryPoint =
+                                                details.localPosition;
+                                          }
+                                        }
+                                      });
+                                    },
+                                    onPanEnd: (details) async {
+                                      if (currentMode == DrawingMode.text ||
+                                          currentMode == DrawingMode.button)
+                                        return;
+                                      if (currentMode == DrawingMode.select) {
+                                        _dragStartOffset = null;
+                                        return;
+                                      }
+                                      setState(() {
+                                        if (currentMode == DrawingMode.pen) {
+                                          points.add(
+                                            DrawingPoint(
+                                              point: Offset.infinite,
+                                              paint: Paint(),
+                                            ),
+                                          );
+                                        }
+                                      });
+                                    },
+                                    child: CustomPaint(
+                                      painter: DrawingPainter(
+                                        pointsList: points,
+                                        selectedPoint: _selectedFrame,
+                                        isDesktopMode: isDesktopMode,
+                                      ),
+                                      size: const Size(3000, 3000),
+                                    ),
+                                  ), // closes GestureDetector
+                                ), // closes MouseRegion
+                              ), // closes Container
+                            ), // closes RepaintBoundary
+                          ), // closes InteractiveViewer
+                          // Floating Input field for editable text
+                          if (_editingElement != null &&
+                              _editingElement!.secondaryPoint != null)
+                            Positioned(
+                              left:
+                                  _editingElement!.point.dx <
+                                      _editingElement!.secondaryPoint!.dx
+                                  ? _editingElement!.point.dx
+                                  : _editingElement!.secondaryPoint!.dx,
+                              top:
+                                  _editingElement!.point.dy <
+                                      _editingElement!.secondaryPoint!.dy
+                                  ? _editingElement!.point.dy
+                                  : _editingElement!.secondaryPoint!.dy,
+                              child: Container(
+                                width:
+                                    (_editingElement!.secondaryPoint!.dx -
+                                            _editingElement!.point.dx)
+                                        .abs(),
+                                height:
+                                    (_editingElement!.secondaryPoint!.dy -
+                                            _editingElement!.point.dy)
+                                        .abs(),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.blueAccent,
+                                    width: 2,
+                                  ),
+                                  color: Colors.white.withOpacity(0.9),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                child: Center(
+                                  child: TextField(
+                                    controller: _elementTextController,
+                                    autofocus: true,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.black,
+                                    ),
+                                    decoration: const InputDecoration(
+                                      border: InputBorder.none,
+                                      isDense: true,
+                                      contentPadding: EdgeInsets.zero,
+                                    ),
+                                    onSubmitted: (val) {
+                                      setState(() {
+                                        _editingElement!.text = val;
+                                        _editingElement = null;
+                                      });
+                                    },
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 24),
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                onEnter: (_) =>
-                                    setState(() => _isGenerateHovered = true),
-                                onExit: (_) =>
-                                    setState(() => _isGenerateHovered = false),
-                                child: GestureDetector(
-                                  onTap: isGenerating ? null : _generatePreview,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(4),
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
+                            ),
+                          if (_editingElement != null &&
+                              _editingElement!.type == ShapeType.text)
+                            Positioned(
+                              left: _editingElement!.point.dx,
+                              top: _editingElement!.point.dy,
+                              child: Container(
+                                width: 150,
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.blueAccent,
+                                    width: 2,
+                                  ),
+                                  color: Colors.white.withOpacity(0.9),
+                                ),
+                                child: TextField(
+                                  controller: _elementTextController,
+                                  autofocus: true,
+                                  style: const TextStyle(
+                                    fontSize: 20,
+                                    color: Colors.black,
+                                  ),
+                                  decoration: const InputDecoration(
+                                    border: InputBorder.none,
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.all(4),
+                                  ),
+                                  onSubmitted: (val) {
+                                    setState(() {
+                                      _editingElement!.text = val;
+                                      _editingElement = null;
+                                    });
+                                  },
+                                ),
+                              ),
+                            ),
+
+                          // Top Right Action Tab (Undo & Clear)
+                          Positioned(
+                            top: 20,
+                            right: 20,
+                            child: Container(
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: isDarkMode
+                                    ? const Color(0xFF2A2A2A)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isDarkMode
+                                      ? Colors.white24
+                                      : Colors.grey.shade400,
+                                  width: 1.0,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.08),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Tooltip(
+                                    message: 'Undo',
+                                    child: InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          if (points.isNotEmpty) {
+                                            points.removeLast();
+                                          }
+                                        });
+                                      },
+                                      child: Icon(
+                                        Icons.undo,
+                                        color: isDarkMode
+                                            ? Colors.white70
+                                            : Colors.black87,
+                                        size: 20,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Container(
+                                    width: 1,
+                                    height: 20,
+                                    color: isDarkMode
+                                        ? Colors.white24
+                                        : Colors.grey.shade300,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Tooltip(
+                                    message: 'Clear Canvas',
+                                    child: InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          points.clear();
+                                          hasGenerated = false;
+                                          generatedHtml = "";
+                                          isClarifying = false;
+                                          _promptController.clear();
+                                          currentMode = DrawingMode.pen;
+                                          uploadedImages.clear();
+                                          _imageCounter = 0;
+                                          _editingElement = null;
+                                          ambiguities.clear();
+                                          currentAmbiguityIndex = 0;
+                                        });
+                                      },
+                                      child: const Icon(
+                                        Icons.delete_outline,
+                                        color: Colors.redAccent,
+                                        size: 20,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // Bottom generator bar using precisely the new UI
+                      Positioned(
+                        bottom: 30.0,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: isDarkMode
+                                    ? const Color(0xFF2A2A2A)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isDarkMode
+                                      ? Colors.white24
+                                      : Colors.grey.shade400,
+                                  width: 1.0,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.08),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  MouseRegion(
+                                    cursor: SystemMouseCursors.click,
+                                    onEnter: (_) =>
+                                        setState(() => _isAddHovered = true),
+                                    onExit: (_) =>
+                                        setState(() => _isAddHovered = false),
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          final int newFrameIndex =
+                                              points
+                                                  .where(
+                                                    (p) =>
+                                                        p.type ==
+                                                        ShapeType.frame,
+                                                  )
+                                                  .length +
+                                              1;
+                                          points.add(
+                                            DrawingPoint(
+                                              point: const Offset(40, 40),
+                                              secondaryPoint: const Offset(
+                                                360,
+                                                690,
+                                              ),
+                                              type: ShapeType.frame,
+                                              text: "screen_$newFrameIndex",
+                                              paint: Paint()
+                                                ..color = Colors.blueAccent
+                                                ..strokeWidth = 6.0
+                                                ..style = PaintingStyle.stroke,
+                                            ),
+                                          );
+                                        });
+                                      },
+                                      child: Icon(
+                                        Icons.add,
                                         color: isDarkMode
                                             ? Colors.white
                                             : Colors.black87,
-                                        width: 1.2,
+                                        size: 24,
                                       ),
                                     ),
-                                    child: isGenerating
-                                        ? SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: isDarkMode
+                                  ),
+                                  const SizedBox(width: 24),
+                                  MouseRegion(
+                                    cursor: SystemMouseCursors.click,
+                                    onEnter: (_) =>
+                                        setState(() => _isSelectHovered = true),
+                                    onExit: (_) => setState(
+                                      () => _isSelectHovered = false,
+                                    ),
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          currentMode = DrawingMode.select;
+                                        });
+                                      },
+                                      child: Icon(
+                                        Icons.pan_tool_alt_outlined,
+                                        color: currentMode == DrawingMode.select
+                                            ? Colors.blueAccent
+                                            : (isDarkMode
                                                   ? Colors.white
-                                                  : Colors.black87,
-                                            ),
-                                          )
-                                        : Icon(
-                                            Icons.arrow_outward,
+                                                  : Colors.black87),
+                                        size: 22,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  MouseRegion(
+                                    cursor: SystemMouseCursors.click,
+                                    onEnter: (_) =>
+                                        setState(() => _isImageHovered = true),
+                                    onExit: (_) =>
+                                        setState(() => _isImageHovered = false),
+                                    child: GestureDetector(
+                                      onTap: _pickImage,
+                                      child: Icon(
+                                        Icons.image_outlined,
+                                        color: isDarkMode
+                                            ? Colors.white
+                                            : Colors.black87,
+                                        size: 22,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  Tooltip(
+                                    message: "Upload Sketch (Background)",
+                                    child: MouseRegion(
+                                      cursor: SystemMouseCursors.click,
+                                      onEnter: (_) => setState(
+                                        () => _isSketchHovered = true,
+                                      ),
+                                      onExit: (_) => setState(
+                                        () => _isSketchHovered = false,
+                                      ),
+                                      child: GestureDetector(
+                                        onTap: _uploadSketch,
+                                        child: Icon(
+                                          Icons.cloud_upload_outlined,
+                                          color: _isSketchHovered
+                                              ? Colors.blueAccent
+                                              : (isDarkMode
+                                                    ? Colors.white
+                                                    : Colors.black87),
+                                          size: 22,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  MouseRegion(
+                                    cursor: SystemMouseCursors.click,
+                                    onEnter: (_) {
+                                      _popupHideTimer?.cancel();
+                                      setState(() => _isPencilHovered = true);
+                                    },
+                                    onExit: (_) {
+                                      setState(() => _isPencilHovered = false);
+                                      _popupHideTimer = Timer(
+                                        const Duration(milliseconds: 2000),
+                                        () {
+                                          if (mounted) setState(() {});
+                                        },
+                                      );
+                                    },
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          if (currentMode != DrawingMode.pen) {
+                                            currentMode = DrawingMode.pen;
+                                          }
+                                        });
+                                      },
+                                      child: Icon(
+                                        Icons.draw_outlined,
+                                        color: currentMode == DrawingMode.pen
+                                            ? Colors.blueAccent
+                                            : (isDarkMode
+                                                  ? Colors.white
+                                                  : Colors.black87),
+                                        size: 22,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  MouseRegion(
+                                    cursor: SystemMouseCursors.click,
+                                    onEnter: (_) => setState(
+                                      () => _isGenerateHovered = true,
+                                    ),
+                                    onExit: (_) => setState(
+                                      () => _isGenerateHovered = false,
+                                    ),
+                                    child: GestureDetector(
+                                      onTap: isGenerating
+                                          ? null
+                                          : _generatePreview,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
                                             color: isDarkMode
                                                 ? Colors.white
                                                 : Colors.black87,
-                                            size: 16,
+                                            width: 1.2,
                                           ),
+                                        ),
+                                        child: isGenerating
+                                            ? SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                      color: isDarkMode
+                                                          ? Colors.white
+                                                          : Colors.black87,
+                                                    ),
+                                              )
+                                            : Icon(
+                                                Icons.arrow_outward,
+                                                color: isDarkMode
+                                                    ? Colors.white
+                                                    : Colors.black87,
+                                                size: 16,
+                                              ),
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        _buildPromptField(),
-                        const SizedBox(width: 16),
-                        _buildDeviceToggle(),
-                      ],
-                    ),
-                  ),
-                  if (_showDrawTools)
-                    Positioned(
-                      bottom: 78,
-                      child: MouseRegion(
-                        onEnter: (_) {
-                          _popupHideTimer?.cancel();
-                          setState(() => _isPopupHovered = true);
-                        },
-                        onExit: (_) {
-                          setState(() => _isPopupHovered = false);
-                          _popupHideTimer = Timer(
-                            const Duration(milliseconds: 2000),
-                            () {
-                              if (mounted) setState(() {});
-                            },
-                          );
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 12.0),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
                             ),
-                            decoration: BoxDecoration(
-                              color: isDarkMode
-                                  ? const Color(0xFF2A2A2A)
-                                  : Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: isDarkMode
-                                    ? Colors.white24
-                                    : Colors.grey.shade400,
-                                width: 1.0,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.08),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                MouseRegion(
-                                  cursor: SystemMouseCursors.click,
-                                  hitTestBehavior: HitTestBehavior.opaque,
-                                  onEnter: (_) =>
-                                      setState(() => _isRectHovered = true),
-                                  onExit: (_) =>
-                                      setState(() => _isRectHovered = false),
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        currentMode = DrawingMode.rectangle;
-                                        _isPopupHovered = false;
-                                      });
-                                    },
-                                    child: Icon(
-                                      Icons.crop_square,
-                                      size: 22,
-                                      color:
-                                          currentMode == DrawingMode.rectangle
-                                          ? Colors.blue
-                                          : _isRectHovered
-                                          ? Colors.blueAccent
-                                          : (isDarkMode
-                                                ? Colors.white
-                                                : Colors.black87),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 24),
-                                MouseRegion(
-                                  cursor: SystemMouseCursors.click,
-                                  hitTestBehavior: HitTestBehavior.opaque,
-                                  onEnter: (_) =>
-                                      setState(() => _isButtonHovered = true),
-                                  onExit: (_) =>
-                                      setState(() => _isButtonHovered = false),
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        currentMode = DrawingMode.button;
-                                        _isPopupHovered = false;
-                                      });
-                                    },
-                                    child: Icon(
-                                      Icons.smart_button,
-                                      size: 22,
-                                      color: currentMode == DrawingMode.button
-                                          ? Colors.blue
-                                          : _isButtonHovered
-                                          ? Colors.blueAccent
-                                          : (isDarkMode
-                                                ? Colors.white
-                                                : Colors.black87),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 24),
-                                MouseRegion(
-                                  cursor: SystemMouseCursors.click,
-                                  hitTestBehavior: HitTestBehavior.opaque,
-                                  onEnter: (_) {},
-                                  onExit: (_) {},
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        currentMode = DrawingMode.text;
-                                        _isPopupHovered = false;
-                                      });
-                                    },
-                                    child: Icon(
-                                      Icons.text_fields,
-                                      size: 22,
-                                      color: currentMode == DrawingMode.text
-                                          ? Colors.blue
-                                          : (isDarkMode
-                                                ? Colors.white
-                                                : Colors.black87),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (isClarifying)
-                    Positioned(
-                      right: 150,
-                      top:
-                          150, // Roughly where the drawn box is based on image context
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // A simple line pointer mimicking the image
-                          Container(
-                            margin: const EdgeInsets.only(top: 40),
-                            width: 50,
-                            height: 2,
-                            color: Colors.black87,
-                          ),
-                          const SizedBox(width: 8),
-                          _buildAIPopup(),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          MouseRegion(
-            cursor: SystemMouseCursors.resizeLeftRight,
-            child: GestureDetector(
-              onPanUpdate: (details) {
-                setState(() {
-                  double totalWidth = MediaQuery.of(context).size.width - 64;
-                  if (totalWidth > 0) {
-                    _leftPanelFraction += details.delta.dx / totalWidth;
-                    _leftPanelFraction = _leftPanelFraction.clamp(0.2, 0.8);
-                  }
-                });
-              },
-              child: Container(
-                width: 4,
-                color: isDarkMode ? Colors.white24 : Colors.grey.shade300,
-              ),
-            ),
-          ),
-
-          // Right Side: Website Preview in a phone frame
-          Expanded(
-            flex: ((1 - _leftPanelFraction) * 100).toInt(),
-            child: Container(
-              color: isDarkMode
-                  ? const Color(0xFF1E1E1E)
-                  : const Color(
-                      0xFFF0F0F0,
-                    ), // Light gray in light mode, dark otherwise
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final targetDeviceWidth = isDesktopMode ? 900.0 : 320.0;
-                  final targetDeviceHeight = isDesktopMode ? 600.0 : 650.0;
-                  const extraHeight = 68.0;
-
-                  double scale = 1.0;
-                  if (targetDeviceWidth > constraints.maxWidth - 40) {
-                    scale = (constraints.maxWidth - 40) / targetDeviceWidth;
-                  }
-                  if ((targetDeviceHeight * scale) + extraHeight > constraints.maxHeight - 40) {
-                    scale = (constraints.maxHeight - 40 - extraHeight) / targetDeviceHeight;
-                  }
-                  if (scale > 1.0) scale = 1.0;
-                  if (scale < 0.2) scale = 0.2;
-
-                  final deviceWidth = targetDeviceWidth * scale;
-                  final deviceHeight = targetDeviceHeight * scale;
-                  final groupHeight = deviceHeight + extraHeight;
-
-                  final deviceTop = (constraints.maxHeight - groupHeight) / 2;
-
-                  return Stack(
-                    fit: StackFit.expand,
-                    clipBehavior: Clip.none,
-                    children: [
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        top: deviceTop,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _buildDeviceMockup(deviceWidth, deviceHeight),
-                            const SizedBox(height: 20),
-                            SizedBox(
-                              width: (deviceWidth < 450.0 ? 450.0 : deviceWidth)
-                                      .clamp(10.0, constraints.maxWidth - 40.0)
-                                      .clamp(10.0, 600.0),
-                              child: _buildGlobalPrunePrompt(),
-                            ),
+                            const SizedBox(width: 16),
+                            _buildPromptField(),
+                            const SizedBox(width: 16),
+                            _buildDeviceToggle(),
                           ],
                         ),
                       ),
+                      if (_showDrawTools)
+                        Positioned(
+                          bottom: 78,
+                          child: MouseRegion(
+                            onEnter: (_) {
+                              _popupHideTimer?.cancel();
+                              setState(() => _isPopupHovered = true);
+                            },
+                            onExit: (_) {
+                              setState(() => _isPopupHovered = false);
+                              _popupHideTimer = Timer(
+                                const Duration(milliseconds: 2000),
+                                () {
+                                  if (mounted) setState(() {});
+                                },
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.only(bottom: 12.0),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isDarkMode
+                                      ? const Color(0xFF2A2A2A)
+                                      : Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: isDarkMode
+                                        ? Colors.white24
+                                        : Colors.grey.shade400,
+                                    width: 1.0,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.08),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    MouseRegion(
+                                      cursor: SystemMouseCursors.click,
+                                      hitTestBehavior: HitTestBehavior.opaque,
+                                      onEnter: (_) =>
+                                          setState(() => _isRectHovered = true),
+                                      onExit: (_) => setState(
+                                        () => _isRectHovered = false,
+                                      ),
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            currentMode = DrawingMode.rectangle;
+                                            _isPopupHovered = false;
+                                          });
+                                        },
+                                        child: Icon(
+                                          Icons.crop_square,
+                                          size: 22,
+                                          color:
+                                              currentMode ==
+                                                  DrawingMode.rectangle
+                                              ? Colors.blue
+                                              : _isRectHovered
+                                              ? Colors.blueAccent
+                                              : (isDarkMode
+                                                    ? Colors.white
+                                                    : Colors.black87),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 24),
+                                    MouseRegion(
+                                      cursor: SystemMouseCursors.click,
+                                      hitTestBehavior: HitTestBehavior.opaque,
+                                      onEnter: (_) => setState(
+                                        () => _isButtonHovered = true,
+                                      ),
+                                      onExit: (_) => setState(
+                                        () => _isButtonHovered = false,
+                                      ),
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            currentMode = DrawingMode.button;
+                                            _isPopupHovered = false;
+                                          });
+                                        },
+                                        child: Icon(
+                                          Icons.smart_button,
+                                          size: 22,
+                                          color:
+                                              currentMode == DrawingMode.button
+                                              ? Colors.blue
+                                              : _isButtonHovered
+                                              ? Colors.blueAccent
+                                              : (isDarkMode
+                                                    ? Colors.white
+                                                    : Colors.black87),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 24),
+                                    MouseRegion(
+                                      cursor: SystemMouseCursors.click,
+                                      hitTestBehavior: HitTestBehavior.opaque,
+                                      onEnter: (_) {},
+                                      onExit: (_) {},
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            currentMode = DrawingMode.text;
+                                            _isPopupHovered = false;
+                                          });
+                                        },
+                                        child: Icon(
+                                          Icons.text_fields,
+                                          size: 22,
+                                          color: currentMode == DrawingMode.text
+                                              ? Colors.blue
+                                              : (isDarkMode
+                                                    ? Colors.white
+                                                    : Colors.black87),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (isClarifying)
+                        Positioned(
+                          right: 150,
+                          top:
+                              150, // Roughly where the drawn box is based on image context
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // A simple line pointer mimicking the image
+                              Container(
+                                margin: const EdgeInsets.only(top: 40),
+                                width: 50,
+                                height: 2,
+                                color: Colors.black87,
+                              ),
+                              const SizedBox(width: 8),
+                              _buildAIPopup(),
+                            ],
+                          ),
+                        ),
                     ],
-                  );
-                },
+                  ),
+                ),
               ),
-            ),
-          ),
-        ],
+              MouseRegion(
+                cursor: SystemMouseCursors.resizeLeftRight,
+                child: GestureDetector(
+                  onPanUpdate: (details) {
+                    setState(() {
+                      double totalWidth =
+                          MediaQuery.of(context).size.width - 64;
+                      if (totalWidth > 0) {
+                        _leftPanelFraction += details.delta.dx / totalWidth;
+                        _leftPanelFraction = _leftPanelFraction.clamp(0.2, 0.8);
+                      }
+                    });
+                  },
+                  child: Container(
+                    width: 4,
+                    color: isDarkMode ? Colors.white24 : Colors.grey.shade300,
+                  ),
+                ),
+              ),
+
+              // Right Side: Website Preview in a phone frame
+              Expanded(
+                flex: ((1 - _leftPanelFraction) * 100).toInt(),
+                child: Container(
+                  color: isDarkMode
+                      ? const Color(0xFF1E1E1E)
+                      : const Color(
+                          0xFFF0F0F0,
+                        ), // Light gray in light mode, dark otherwise
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final targetDeviceWidth = isDesktopMode ? 900.0 : 320.0;
+                      final targetDeviceHeight = isDesktopMode ? 600.0 : 650.0;
+                      const extraHeight = 68.0;
+
+                      double scale = 1.0;
+                      if (targetDeviceWidth > constraints.maxWidth - 40) {
+                        scale = (constraints.maxWidth - 40) / targetDeviceWidth;
+                      }
+                      if ((targetDeviceHeight * scale) + extraHeight >
+                          constraints.maxHeight - 40) {
+                        scale =
+                            (constraints.maxHeight - 40 - extraHeight) /
+                            targetDeviceHeight;
+                      }
+                      if (scale > 1.0) scale = 1.0;
+                      if (scale < 0.2) scale = 0.2;
+
+                      final deviceWidth = targetDeviceWidth * scale;
+                      final deviceHeight = targetDeviceHeight * scale;
+                      final groupHeight = deviceHeight + extraHeight;
+
+                      final deviceTop =
+                          (constraints.maxHeight - groupHeight) / 2;
+
+                      return Stack(
+                        fit: StackFit.expand,
+                        clipBehavior: Clip.none,
+                        children: [
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            top: deviceTop,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _buildDeviceMockup(deviceWidth, deviceHeight),
+                                const SizedBox(height: 20),
+                                SizedBox(
+                                  width:
+                                      (deviceWidth < 450.0
+                                              ? 450.0
+                                              : deviceWidth)
+                                          .clamp(
+                                            10.0,
+                                            constraints.maxWidth - 40.0,
+                                          )
+                                          .clamp(10.0, 600.0),
+                                  child: _buildGlobalPrunePrompt(),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
           ),
           if (_showPrunePopup)
             Positioned.fill(
@@ -1764,8 +1911,20 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
             ),
           if (_showPrunePopup)
             Positioned(
-              left: _prunePosition.dx.clamp(10.0, (MediaQuery.of(context).size.width - 260.0).clamp(10.0, double.infinity)),
-              top: _prunePosition.dy.clamp(10.0, (MediaQuery.of(context).size.height - 250.0).clamp(10.0, double.infinity)),
+              left: _prunePosition.dx.clamp(
+                10.0,
+                (MediaQuery.of(context).size.width - 260.0).clamp(
+                  10.0,
+                  double.infinity,
+                ),
+              ),
+              top: _prunePosition.dy.clamp(
+                10.0,
+                (MediaQuery.of(context).size.height - 250.0).clamp(
+                  10.0,
+                  double.infinity,
+                ),
+              ),
               child: Material(
                 type: MaterialType.transparency,
                 child: _buildPrunePopup(),
@@ -1773,8 +1932,20 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
             ),
           if (_showColorPicker)
             Positioned(
-              left: _colorPickerPosition.dx.clamp(10.0, (MediaQuery.of(context).size.width - 260.0).clamp(10.0, double.infinity)),
-              top: _colorPickerPosition.dy.clamp(10.0, (MediaQuery.of(context).size.height - 350.0).clamp(10.0, double.infinity)),
+              left: _colorPickerPosition.dx.clamp(
+                10.0,
+                (MediaQuery.of(context).size.width - 260.0).clamp(
+                  10.0,
+                  double.infinity,
+                ),
+              ),
+              top: _colorPickerPosition.dy.clamp(
+                10.0,
+                (MediaQuery.of(context).size.height - 350.0).clamp(
+                  10.0,
+                  double.infinity,
+                ),
+              ),
               child: Material(
                 type: MaterialType.transparency,
                 child: LiveColorPicker(
@@ -1931,13 +2102,16 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         apiKey: geminiApiKey,
       );
       final response = await model.generateContent([
-        Content.text(promptText.toString())
+        Content.text(promptText.toString()),
       ]);
 
       if (response.text != null) {
         String text = response.text!;
 
-        final htmlBlockRegex = RegExp(r'```(?:html|xml)\s*([\s\S]*?)```', caseSensitive: false);
+        final htmlBlockRegex = RegExp(
+          r'```(?:html|xml)\s*([\s\S]*?)```',
+          caseSensitive: false,
+        );
         final genericBlockRegex = RegExp(r'```[a-zA-Z]*\s*([\s\S]*?)```');
         final htmlMatch = htmlBlockRegex.firstMatch(text);
         if (htmlMatch != null) {
@@ -1964,6 +2138,68 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         setState(() {
           hasGenerated = true; // revert to false was a bad state
           isGenerating = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _uploadImageForAI() async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+    if (image != null) {
+      final bytes = await image.readAsBytes();
+      final imageId = "{IMG_${_imageCounter++}}";
+      
+      try {
+        final fileName = 'upload_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        await Supabase.instance.client.storage
+            .from('images')
+            .uploadBinary(
+              fileName,
+              bytes,
+              fileOptions: const FileOptions(contentType: 'image/jpeg'),
+            );
+
+        final publicUrl = Supabase.instance.client.storage
+            .from('images')
+            .getPublicUrl(fileName);
+
+        setState(() {
+          uploadedImages[imageId] = publicUrl;
+          final answer = "I have uploaded an image. Use $imageId for this frame.";
+          
+          if (currentAmbiguityIndex < ambiguities.length - 1) {
+             _promptController.text +=
+                 "\nQ: $clarifyQuestion -> A: $answer";
+             currentAmbiguityIndex++;
+             _aiReplyController.clear();
+          } else {
+             _promptController.text +=
+                 "\nQ: $clarifyQuestion -> A: $answer";
+             isClarifying = false;
+             _generatePreview(userReply: "All questions answered");
+             _aiReplyController.clear();
+          }
+        });
+      } catch (error) {
+        final base64String = base64Encode(bytes);
+        final base64Url = "data:image/jpeg;base64,$base64String";
+        setState(() {
+          uploadedImages[imageId] = base64Url;
+          final answer = "I have uploaded an image. Use $imageId for this frame.";
+          
+          if (currentAmbiguityIndex < ambiguities.length - 1) {
+             _promptController.text +=
+                 "\nQ: $clarifyQuestion -> A: $answer";
+             currentAmbiguityIndex++;
+             _aiReplyController.clear();
+          } else {
+             _promptController.text +=
+                 "\nQ: $clarifyQuestion -> A: $answer";
+             isClarifying = false;
+             _generatePreview(userReply: "All questions answered");
+             _aiReplyController.clear();
+          }
         });
       }
     }
@@ -2063,6 +2299,21 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                     ),
                   ),
                 const SizedBox(height: 16),
+                if (clarifyNeedsImage)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isDarkMode ? Colors.blueAccent : Colors.blue.shade600,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: _uploadImageForAI,
+                      icon: const Icon(Icons.upload_file, size: 18),
+                      label: const Text("Upload Image"),
+                    ),
+                  ),
                 Container(
                   color: isDarkMode
                       ? const Color(0xFF3A3A3A)
@@ -2356,13 +2607,16 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
         apiKey: geminiApiKey,
       );
       final response = await model.generateContent([
-        Content.text(promptText.toString())
+        Content.text(promptText.toString()),
       ]);
 
       if (response.text != null) {
         String text = response.text!;
 
-        final htmlBlockRegex = RegExp(r'```(?:html|xml)\s*([\s\S]*?)```', caseSensitive: false);
+        final htmlBlockRegex = RegExp(
+          r'```(?:html|xml)\s*([\s\S]*?)```',
+          caseSensitive: false,
+        );
         final genericBlockRegex = RegExp(r'```[a-zA-Z]*\s*([\s\S]*?)```');
         final htmlMatch = htmlBlockRegex.firstMatch(text);
         if (htmlMatch != null) {
@@ -2669,9 +2923,14 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
           setState(() {
             _currentColor = _parseCssColor(colorStr);
             if (_iframeContainerKey.currentContext != null) {
-              final box = _iframeContainerKey.currentContext!.findRenderObject() as RenderBox;
+              final box =
+                  _iframeContainerKey.currentContext!.findRenderObject()
+                      as RenderBox;
               final globalPos = box.localToGlobal(Offset(x, y));
-              _colorPickerPosition = Offset(globalPos.dx + 20, globalPos.dy - 100);
+              _colorPickerPosition = Offset(
+                globalPos.dx + 20,
+                globalPos.dy - 100,
+              );
             } else {
               _colorPickerPosition = Offset(x, y);
             }
@@ -2683,7 +2942,9 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
           setState(() {
             _pruneComponentHtml = fullHtml;
             if (_iframeContainerKey.currentContext != null) {
-              final box = _iframeContainerKey.currentContext!.findRenderObject() as RenderBox;
+              final box =
+                  _iframeContainerKey.currentContext!.findRenderObject()
+                      as RenderBox;
               final globalPos = box.localToGlobal(Offset(x, y));
               _prunePosition = Offset(globalPos.dx - 125, globalPos.dy);
             } else {
@@ -2900,7 +3161,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
 
 enum DrawingMode { select, pen, rectangle, circle, text, button }
 
-enum ShapeType { line, rectangle, circle, text, image, button, frame }
+enum ShapeType { line, rectangle, circle, text, image, button, frame, sketch }
 
 class DrawingPoint {
   Offset point;
@@ -3023,7 +3284,7 @@ class DrawingPainter extends CustomPainter {
         );
         textPainter.layout();
         textPainter.paint(canvas, p.point);
-      } else if (p.type == ShapeType.image &&
+      } else if ((p.type == ShapeType.image || p.type == ShapeType.sketch) &&
           p.image != null &&
           p.secondaryPoint != null) {
         // Draw actual image scaled
@@ -3039,7 +3300,7 @@ class DrawingPainter extends CustomPainter {
           p.paint,
         );
         // Draw the red tag on top for AI to recognize
-        if (p.imageId != null) {
+        if (p.type == ShapeType.image && p.imageId != null) {
           final tagSpan = TextSpan(
             text: p.imageId,
             style: const TextStyle(
