@@ -7,15 +7,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'preview/live_preview.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:http/http.dart' as http;
 
-// IMPORTANT: Replace this with your valid Gemini API Key.
-// WARNING: Hardcoding keys here is insecure for production. Anyone can see it.
-const String geminiApiKey = 'AIzaSyBWhFX6E81NCAu7q8eetteMzFQkgMHU_M8';
+const String functionsApiUrl = String.fromEnvironment('FUNCTIONS_API_URL', defaultValue: 'https://cinelock-nh1ei9rpn-abhiscodefuns-projects.vercel.app/api/generate');
 
-// IMPORTANT: Replace these with your Supabase credentials!
-const String supabaseUrl = 'https://ldpodxtofvusyvpbxcta.supabase.co';
-const String supabaseAnonKey = 'sb_publishable_jvUUEd1pCdnIrAuUsNovIA_dp-GElV-';
+const String supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
+const String supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON', defaultValue: '');
 
 enum ResizeHandle {
   none,
@@ -101,6 +98,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   bool _isSelectHovered = false;
   bool _isImageHovered = false;
   bool _isSketchHovered = false;
+  bool _isColorPickerHovered = false;
   Timer? _popupHideTimer;
 
   DrawingPoint? _selectedFrame;
@@ -257,22 +255,29 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     }
 
     try {
-      // Set up Gemini SDK
-      final model = GenerativeModel(
-        model: 'gemini-2.5-flash',
-        apiKey: geminiApiKey,
-      );
-
-      final parts = <Part>[TextPart(promptText.toString())];
-
+      String? base64Image;
       if (imageBytes.isNotEmpty) {
-        parts.add(DataPart('image/png', imageBytes));
+        base64Image = base64Encode(imageBytes);
       }
 
-      final content = Content.multi(parts);
-      final response = await model.generateContent([content]);
+      final uri = Uri.parse(functionsApiUrl);
+      final httpResponse = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'promptText': promptText.toString(),
+          'base64Image': base64Image,
+          'isInitialGeneration': isInitialGeneration,
+        }),
+      );
 
-      String text = response.text ?? "";
+      String text = "";
+      if (httpResponse.statusCode == 200) {
+        final data = jsonDecode(httpResponse.body);
+        text = data['text'] ?? "";
+      } else {
+        throw Exception("Failed to generate UI. Status code: ${httpResponse.statusCode}");
+      }
       debugPrint(
         "========== GEMINI RAW RESPONSE ==========\n$text\n==========================================",
       );
@@ -341,8 +346,17 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     }
   }
 
+  void _setDrawingMode(DrawingMode mode) {
+    setState(() {
+      currentMode = mode;
+      _isPopupHovered = false;
+    });
+    setPreviewColorPickerMode(mode == DrawingMode.colorPicker);
+  }
+
   void _generatePreview({String? userReply}) async {
     if (points.isEmpty && !hasGenerated) {
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please sketch something first!")),
       );
@@ -577,25 +591,44 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
 
   Future<void> _uploadSketch() async {
     final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
-    if (image != null) {
-      final bytes = await image.readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      final uiImage = frame.image;
+    final List<XFile> images = await picker.pickMultiImage();
+    if (images.isNotEmpty) {
+      double currentOffsetX = 50.0;
+      double topOffsetY = 50.0;
+      double gap = 80.0;
 
-      setState(() {
-        points.insert(
-          0,
-          DrawingPoint(
-            point: const Offset(50, 50),
-            secondaryPoint: Offset(50.0 + uiImage.width, 50.0 + uiImage.height),
+      for (var image in images) {
+        final bytes = await image.readAsBytes();
+        final codec = await ui.instantiateImageCodec(bytes);
+        final frame = await codec.getNextFrame();
+        final uiImage = frame.image;
+
+        setState(() {
+          final sketchPoint = DrawingPoint(
+            point: Offset(currentOffsetX, topOffsetY),
+            secondaryPoint: Offset(currentOffsetX + uiImage.width, topOffsetY + uiImage.height),
             paint: Paint(),
             type: ShapeType.sketch,
             image: uiImage,
-          ),
-        );
-      });
+          );
+
+          final framePoint = DrawingPoint(
+            point: Offset(currentOffsetX - 10, topOffsetY - 10),
+            secondaryPoint: Offset(currentOffsetX + uiImage.width + 10, topOffsetY + uiImage.height + 10),
+            paint: Paint()
+              ..color = Colors.black87
+              ..strokeWidth = 2.5
+              ..style = PaintingStyle.stroke,
+            type: ShapeType.frame,
+          );
+
+          // Insert frame first as background, sketch above
+          points.insert(0, framePoint);
+          points.insert(1, sketchPoint);
+        });
+
+        currentOffsetX += uiImage.width + gap;
+      }
     }
   }
 
@@ -1496,9 +1529,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                     ),
                                     child: GestureDetector(
                                       onTap: () {
-                                        setState(() {
-                                          currentMode = DrawingMode.select;
-                                        });
+                                        _setDrawingMode(DrawingMode.select);
                                       },
                                       child: Icon(
                                         Icons.pan_tool_alt_outlined,
@@ -1572,17 +1603,37 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                     },
                                     child: GestureDetector(
                                       onTap: () {
-                                        setState(() {
-                                          if (currentMode != DrawingMode.pen) {
-                                            currentMode = DrawingMode.pen;
-                                          }
-                                        });
+                                        _setDrawingMode(DrawingMode.pen);
                                       },
                                       child: Icon(
                                         Icons.draw_outlined,
                                         color: currentMode == DrawingMode.pen
                                             ? Colors.blueAccent
                                             : (isDarkMode
+                                                  ? Colors.white
+                                                  : Colors.black87),
+                                        size: 22,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  MouseRegion(
+                                    cursor: SystemMouseCursors.click,
+                                    onEnter: (_) => setState(
+                                      () => _isColorPickerHovered = true,
+                                    ),
+                                    onExit: (_) => setState(
+                                      () => _isColorPickerHovered = false,
+                                    ),
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        _setDrawingMode(DrawingMode.colorPicker);
+                                      },
+                                      child: Icon(
+                                        Icons.colorize,
+                                        color: currentMode == DrawingMode.colorPicker
+                                            ? Colors.blueAccent
+                                            : _isColorPickerHovered ? Colors.blue : (isDarkMode
                                                   ? Colors.white
                                                   : Colors.black87),
                                         size: 22,
@@ -1701,10 +1752,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                       ),
                                       child: GestureDetector(
                                         onTap: () {
-                                          setState(() {
-                                            currentMode = DrawingMode.rectangle;
-                                            _isPopupHovered = false;
-                                          });
+                                          _setDrawingMode(DrawingMode.rectangle);
                                         },
                                         child: Icon(
                                           Icons.crop_square,
@@ -1733,10 +1781,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                       ),
                                       child: GestureDetector(
                                         onTap: () {
-                                          setState(() {
-                                            currentMode = DrawingMode.button;
-                                            _isPopupHovered = false;
-                                          });
+                                          _setDrawingMode(DrawingMode.button);
                                         },
                                         child: Icon(
                                           Icons.smart_button,
@@ -1760,10 +1805,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
                                       onExit: (_) {},
                                       child: GestureDetector(
                                         onTap: () {
-                                          setState(() {
-                                            currentMode = DrawingMode.text;
-                                            _isPopupHovered = false;
-                                          });
+                                          _setDrawingMode(DrawingMode.text);
                                         },
                                         child: Icon(
                                           Icons.text_fields,
@@ -2097,16 +2139,24 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     );
 
     try {
-      final model = GenerativeModel(
-        model: 'gemini-2.5-flash',
-        apiKey: geminiApiKey,
+      String text = "";
+      final uri = Uri.parse(functionsApiUrl);
+      final httpResponse = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'promptText': promptText.toString(),
+        }),
       );
-      final response = await model.generateContent([
-        Content.text(promptText.toString()),
-      ]);
 
-      if (response.text != null) {
-        String text = response.text!;
+      if (httpResponse.statusCode == 200) {
+        final data = jsonDecode(httpResponse.body);
+        text = data['text'] ?? "";
+      } else {
+        throw Exception("Failed to call backend. Status code: ${httpResponse.statusCode}");
+      }
+
+      if (text.isNotEmpty) {
 
         final htmlBlockRegex = RegExp(
           r'```(?:html|xml)\s*([\s\S]*?)```',
@@ -2602,16 +2652,24 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     );
 
     try {
-      final model = GenerativeModel(
-        model: 'gemini-2.5-flash',
-        apiKey: geminiApiKey,
+      String text = "";
+      final uri = Uri.parse(functionsApiUrl);
+      final httpResponse = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'promptText': promptText.toString(),
+        }),
       );
-      final response = await model.generateContent([
-        Content.text(promptText.toString()),
-      ]);
 
-      if (response.text != null) {
-        String text = response.text!;
+      if (httpResponse.statusCode == 200) {
+        final data = jsonDecode(httpResponse.body);
+        text = data['text'] ?? "";
+      } else {
+        throw Exception("Failed to call backend. Status code: ${httpResponse.statusCode}");
+      }
+
+      if (text.isNotEmpty) {
 
         final htmlBlockRegex = RegExp(
           r'```(?:html|xml)\s*([\s\S]*?)```',
@@ -2836,11 +2894,16 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   (function() {
     let targetEl = null;
     let isTextTarget = false;
+    let isColorPickerMode = false;
 
     window.addEventListener('message', function(e) {
       let data = e.data;
       if (typeof data === 'string') {
         try { data = JSON.parse(data); } catch(err) {}
+      }
+      if (data && data.type === 'SET_COLOR_PICKER_MODE') {
+         isColorPickerMode = data.enabled;
+         return;
       }
       if (data && data.type === 'UPDATE_COLOR') {
          if (targetEl) {
@@ -2879,6 +2942,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
     });
 
     document.addEventListener('click', function(e) {
+      if (!isColorPickerMode) return;
       e.preventDefault();
       e.stopPropagation();
 
@@ -3159,7 +3223,7 @@ class _SketchPreviewScreenState extends State<SketchPreviewScreen> {
   }
 }
 
-enum DrawingMode { select, pen, rectangle, circle, text, button }
+enum DrawingMode { select, pen, rectangle, circle, text, button, colorPicker }
 
 enum ShapeType { line, rectangle, circle, text, image, button, frame, sketch }
 
