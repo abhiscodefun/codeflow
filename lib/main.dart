@@ -9,7 +9,7 @@ import 'dart:async';
 import 'preview/live_preview.dart';
 import 'package:http/http.dart' as http;
 
-const String functionsApiUrl = String.fromEnvironment('FUNCTIONS_API_URL', defaultValue: 'https://cinelock-nh1ei9rpn-abhiscodefuns-projects.vercel.app/api/generate');
+const String functionsApiUrl = String.fromEnvironment('FUNCTIONS_API_URL', defaultValue: 'https://cinelock-api.vercel.app/api/generate');
 
 const String supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
 const String supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON', defaultValue: '');
